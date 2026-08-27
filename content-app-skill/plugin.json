@@ -1,0 +1,115 @@
+{
+  "hubId": "content-app",
+  "active": true,
+  "name": "Content App",
+  "version": "1.0.0",
+  "description": "[Tool] Content App API. save=Angle/Idee/Quelle speichern. query=Daten abrufen. plan=Redaktionsplan. produzieren=Post generieren.",
+  "author": "timratig",
+  "author_url": "https://hub.anythingllm.com/u/timratig",
+  "license": "viminds internal",
+  "examples": [
+    {
+      "prompt": "Speichere einen Angle.",
+      "call": "{\"action\": \"save\", \"type\": \"angle\", \"data\": {\"angle\": \"Ein CRM ohne Mechanismus simuliert nur Sicherheit.\", \"unit\": \"viscale\", \"icp\": \"B2B-2\"}}"
+    },
+    {
+      "prompt": "Speichere eine Quelle.",
+      "call": "{\"action\": \"save\", \"type\": \"source\", \"data\": {\"title\": \"HubSpot Pricing 2025\", \"type\": \"pdf\", \"unit\": \"viscale\", \"batch_key\": \"hubspot-2025\"}}"
+    },
+    {
+      "prompt": "Zeige alle Angles.",
+      "call": "{\"action\": \"query\", \"type\": \"angles\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Zeige das Batch-Ranking.",
+      "call": "{\"action\": \"query\", \"type\": \"batch_ranking\", \"batch_key\": \"hubspot-2025\"}"
+    },
+    {
+      "prompt": "Zeige den Redaktionsplan.",
+      "call": "{\"action\": \"plan\", \"mode\": \"show\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Zeige das Kanban-Board.",
+      "call": "{\"action\": \"plan\", \"mode\": \"kanban\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Produziere einen LinkedIn Post.",
+      "call": "{\"action\": \"produzieren\", \"angle_id\": \"ANG-XXXXXX\", \"format\": \"linkedin_post\"}"
+    },
+    {
+      "prompt": "Übersicht über das Content System.",
+      "call": "{\"action\": \"query\", \"type\": \"overview\", \"unit\": \"viscale\"}"
+    }
+  ],
+  "setup_args": {
+    "CONTENT_API_URL": {
+      "type": "string",
+      "required": true,
+      "input": {
+        "type": "text",
+        "default": "https://content.viminds.de",
+        "placeholder": "https://content.viminds.de",
+        "hint": "Base URL der Content App"
+      }
+    },
+    "CONTENT_API_TOKEN": {
+      "type": "string",
+      "required": false,
+      "input": {
+        "type": "text",
+        "default": "",
+        "placeholder": "API Token (optional)",
+        "hint": "Laravel Sanctum Token für Authentifizierung"
+      }
+    }
+  },
+  "entrypoint": {
+    "file": "handler.js",
+    "params": {
+      "action": {
+        "description": "Aktion: save, query, plan, produzieren",
+        "type": "string"
+      },
+      "type": {
+        "description": "Für save: angle, source, idee. Für query: angles, sources, content, overview, batch_ranking, strategy, media.",
+        "type": "string"
+      },
+      "data": {
+        "description": "JSON-Objekt mit den zu speichernden Daten (für action=save).",
+        "type": "string"
+      },
+      "unit": {
+        "description": "Unit-Key: viscale oder vitalents.",
+        "type": "string"
+      },
+      "batch_key": {
+        "description": "Batch-Key für Filter/Ranking.",
+        "type": "string"
+      },
+      "angle_id": {
+        "description": "Angle-ID für produzieren.",
+        "type": "string"
+      },
+      "format": {
+        "description": "Output-Format: linkedin_post, ad_copy, newsletter_bk, newsletter_acquisition, landing_page_headlines.",
+        "type": "string"
+      },
+      "mode": {
+        "description": "Für plan: show (Liste) oder kanban (Board).",
+        "type": "string"
+      },
+      "icp": {
+        "description": "ICP-Filter: B2B-1, B2B-2, B2B-3, B2C, UNI, BK.",
+        "type": "string"
+      },
+      "status": {
+        "description": "Status-Filter.",
+        "type": "string"
+      },
+      "strategy_key": {
+        "description": "Strategy-Key: brand_voice, channel_rules, icp_channel_mapping, media_logic, editorial_rhythm, content_strategy, post_templates, content_personas.",
+        "type": "string"
+      }
+    }
+  }
+}

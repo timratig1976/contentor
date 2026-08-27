@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Environment
+.env
+.env.backup
+.env.production
+
+# Build output
+public/build/
+public/hot
+
+# Storage
+storage/*.key
+storage/logs/
+storage/framework/cache/
+storage/framework/sessions/
+storage/framework/views/
+
+# Database
+database/*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sensitive (credentials in plugin.json)
+content-system/
+context-db/
+
+# Docker
+docker/dbdata/
