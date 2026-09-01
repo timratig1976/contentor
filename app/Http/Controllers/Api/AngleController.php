@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Angle;
 use App\Models\Strategy;
 use App\Services\ContentRulesService;
+use App\Services\EmbeddingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,6 +14,7 @@ class AngleController extends Controller
 {
     public function __construct(
         private ContentRulesService $rulesService,
+        private EmbeddingService $embeddingService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -87,7 +89,32 @@ class AngleController extends Controller
             'viscale_phase' => $validated['viscale_phase'] ?? null,
         ]);
 
+        // Embedding + Duplikat-Check
+        $this->attachEmbeddingAndCheckDuplicate($angle);
+
         return response()->json($angle->load(['strategy', 'source']), 201);
+    }
+
+    /**
+     * Berechnet das Embedding für den Angle und prüft auf Duplikate.
+     * Setzt embedding, duplicate_of_id und similarity_score.
+     */
+    private function attachEmbeddingAndCheckDuplicate(Angle $angle): void
+    {
+        $vector = $this->embeddingService->embed($angle->angle);
+        if (!is_array($vector)) {
+            return; // kein Key / API-Fehler → still skip
+        }
+
+        $angle->forceFill([
+            'embedding' => json_encode($vector),
+        ])->save();
+
+        $similar = $this->embeddingService->findMostSimilar($vector, $angle->strategy_id, $angle->id);
+        $angle->forceFill([
+            'duplicate_of_id'  => $similar['id'] ?? null,
+            'similarity_score' => $similar['similarity'] ?? null,
+        ])->save();
     }
 
     public function update(Request $request, Angle $angle): JsonResponse
@@ -104,13 +131,22 @@ class AngleController extends Controller
             'r_viscale_fit' => 'sometimes|integer|min:1|max:3',
             'r_schaerfe' => 'sometimes|integer|min:1|max:3',
             'r_timing' => 'sometimes|integer|min:1|max:3',
+            'score_reasoning' => 'sometimes|nullable|string',
         ]);
+
+        $angleTextChanged = isset($validated['angle']) && $validated['angle'] !== $angle->angle;
 
         $angle->update($validated);
 
         // Auto-calculate ranking if any ranking criteria changed
         if (array_intersect(array_keys($validated), ['r_zielgruppe', 'r_viscale_fit', 'r_schaerfe', 'r_timing'])) {
             $angle->updateRanking();
+            $angle->refresh();
+        }
+
+        // Angle-Text geändert → Embedding + Duplikat-Check neu
+        if ($angleTextChanged) {
+            $this->attachEmbeddingAndCheckDuplicate($angle);
             $angle->refresh();
         }
 

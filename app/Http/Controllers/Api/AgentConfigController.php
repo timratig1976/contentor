@@ -63,7 +63,7 @@ class AgentConfigController extends Controller
         $agentModel = $models[$validated['agent']] ?? ['provider' => 'openai', 'model' => 'gpt-4o'];
 
         $provider = $agentModel['provider'];
-        $model = $this->normalizeModelId($agentModel['model'], $provider);
+        $model = $this->withProviderPrefix($agentModel['model'], $provider);
 
         $prompts = Setting::where('key', 'agent_prompts')->first()?->value ?? [];
         $basePrompt = $prompts[$validated['agent']] ?? "Du bist ein hilfreicher Agent.";
@@ -77,15 +77,18 @@ class AgentConfigController extends Controller
             ? str_replace('{{strategy_context}}', $contextBlock, $basePrompt)
             : $basePrompt . "\n\n" . $contextBlock;
 
-        // EdenAI Chat API
+        // EdenAI v3 Chat API (OpenAI-kompatibel) — identisch zum Python-Agent-Pfad.
+        // Der alte v2/text/chat-Endpoint übersetzt Modell-IDs intern (z. B.
+        // claude-sonnet-4-6 → claude-3-5-sonnet-latest) und schlägt dadurch fehl.
         $response = \Illuminate\Support\Facades\Http::withHeaders([
             'Authorization' => 'Bearer ' . $edenaiKey,
             'Content-Type' => 'application/json',
-        ])->timeout(120)->post('https://api.edenai.run/v2/text/chat', [
-            'providers' => $provider,
+        ])->timeout(120)->post('https://api.edenai.run/v3/chat/completions', [
             'model' => $model,
-            'text' => $validated['message'],
-            'chatbot_global_action' => $systemPrompt,
+            'messages' => [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $validated['message']],
+            ],
             'temperature' => 0.7,
             'max_tokens' => 2000,
         ]);
@@ -94,7 +97,7 @@ class AgentConfigController extends Controller
 
         // HTTP-Fehler von EdenAI (z. B. 400/401/404) direkt melden
         if ($response->failed()) {
-            $message = $data['error'] ?? $data['message'] ?? $response->body();
+            $message = $data['error']['message'] ?? $data['error'] ?? $data['message'] ?? $response->body();
             $error = "EdenAI Fehler (HTTP {$response->status()}): " . (is_string($message) ? $message : json_encode($message));
 
             AgentLog::create([
@@ -115,16 +118,11 @@ class AgentConfigController extends Controller
             ], $response->status());
         }
 
-        $providerResult = $data[$provider] ?? null;
-        $generatedText = is_array($providerResult)
-            ? ($providerResult['generated_text'] ?? null)
-            : (is_string($providerResult) ? $providerResult : null);
+        $generatedText = $data['choices'][0]['message']['content'] ?? null;
 
-        // EdenAI liefert bei Provider-Fehlern status=fail statt generated_text
+        // EdenAI liefert bei Provider-Fehlern keinen Content
         if (!$generatedText) {
-            $reason = is_array($providerResult)
-                ? ($providerResult['error'] ?? $providerResult['message'] ?? $providerResult['status'] ?? null)
-                : null;
+            $reason = $data['error']['message'] ?? $data['error'] ?? $data['message'] ?? null;
             $error = 'EdenAI lieferte keine Antwort: '
                 . ($reason ? (is_string($reason) ? $reason : json_encode($reason)) : json_encode($data));
 
@@ -195,13 +193,15 @@ class AgentConfigController extends Controller
     }
 
     /**
-     * Modell-ID normalisieren: Die EdenAI v3 Modell-Liste liefert IDs wie
-     * "deepinfra/openai/gpt-oss-120b-Ultra". Wenn der Provider bereits separat
-     * gesetzt ist, muss der führende Provider-Präfix entfernt werden, sonst
-     * sendet die Chat API "deepinfra/deepinfra/openai/..." und bekommt keine Antwort.
+     * Modell-ID für EdenAI v3 aufbereiten: Der v3-Chat-Endpoint erwartet die
+     * vollständige ID im Format "provider/modell" (z. B. "anthropic/claude-sonnet-4-6").
+     * Fehlt der Präfix, wird er ergänzt; ist er schon da, bleibt er unverändert.
      */
-    private function normalizeModelId(string $model, string $provider): string
+    private function withProviderPrefix(string $model, string $provider): string
     {
-        return preg_replace('#^' . preg_quote($provider, '#') . '/#i', '', $model);
+        if (str_starts_with($model, $provider . '/')) {
+            return $model;
+        }
+        return $provider . '/' . $model;
     }
 }

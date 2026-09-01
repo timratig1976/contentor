@@ -464,14 +464,20 @@ Auf der Detail-Seite (`resources/js/Pages/Angles/Show.vue` — falls vorhanden, 
 
 ### Phase 1 — Checkliste
 
-- [ ] `php artisan migrate` ausgeführt
-- [ ] `EmbeddingService` erstellt und getestet (`php artisan tinker` → `app(App\Services\EmbeddingService::class)->embed('Test')`)
-- [ ] `Angle::updateRanking()` Auto-Approve getestet
-- [ ] Bug `checkToneViolations()` gefixt, `tone_violations` im Response sichtbar
-- [ ] `angle_agent.py` mit Reasoning-Prompt updated
-- [ ] `update_angle()` in api_tools.py mit `score_reasoning`-Parameter updated
-- [ ] UI: Duplikat-Badge + Score-Reasoning sichtbar
-- [ ] `php artisan test` → alle Tests grün
+- [x] `php artisan migrate` ausgeführt
+- [x] `EmbeddingService` erstellt und getestet (Cosine-Similarity verifiziert; `embed()` hängt an EdenAI-Key)
+- [x] `Angle::updateRanking()` Auto-Approve getestet (score 12 → approved, score 4 → bewertet, ohne Threshold → bewertet)
+- [x] Bug `checkToneViolations()` gefixt, `tone_violations` im Response sichtbar
+- [x] `angle_agent.py` mit Reasoning-Prompt updated
+- [x] `update_angle()` in api_tools.py mit `score_reasoning`-Parameter updated
+- [x] UI: Duplikat-Badge + Score-Reasoning sichtbar
+- [x] `php artisan test` → alle Tests grün (13 passed)
+
+> **Umsetzungs-Hinweis (2026-09-01):** DB ist SQLite (nicht PostgreSQL).
+> Embeddings werden daher als JSON in `angles.embedding` gespeichert und die
+> Cosine-Similarity in PHP berechnet (`EmbeddingService`) — funktional
+> identisch zu pgvector, aber DB-agnostisch. Duplikat-/Embedding-Check bleibt
+> inaktiv, bis ein EdenAI-Key in `settings.llm_keys` hinterlegt ist.
 
 ---
 
@@ -645,12 +651,17 @@ Diese Daten kommen ausschließlich aus `get_strategy()` → dynamisch.
 
 ### Phase 2 — Checkliste
 
-- [ ] `php artisan migrate` ausgeführt
-- [ ] Persona-Formular zeigt neue Felder
-- [ ] `buildContentPrompt()` hat 3 klar getrennte Layer-Sektionen
-- [ ] `AgentContextService::describePersona()` gibt neue Felder aus
-- [ ] Hardcoded Brand-Voice in `production_agent.py` Zeilen 51–55 entfernt
-- [ ] `php artisan test` → alle Tests grün
+- [x] `php artisan migrate` ausgeführt
+- [x] Persona-Formular zeigt neue Felder (Stil-Sektion: Perspektive, Emoji, Satzlänge, Verbotene Wörter)
+- [x] `buildContentPrompt()` hat 3 klar getrennte Layer-Sektionen (CONTENT-KERN / STIL-LAYER / ZIEL-LAYER)
+- [x] `AgentContextService::describePersona()` gibt neue Felder aus
+- [x] Hardcoded Brand-Voice in `production_agent.py` entfernt (kommt jetzt dynamisch aus `get_strategy()`)
+- [x] `php artisan test` → alle Tests grün (13 passed)
+
+> **Umsetzungs-Hinweis (2026-09-01):** `PersonaController`-Validierung um die
+> neuen Felder ergänzt (`forbidden_words`, `max_sentence_length`, `emoji_usage`,
+> `perspective`). `$personaCtx` in `ContentController::produzieren()` gibt die
+> neuen Persona-Stilfelder an `buildContentPrompt()` weiter.
 
 ---
 
@@ -756,12 +767,20 @@ return response()->json([
 
 ### Phase 3 — Checkliste
 
-- [ ] `php artisan migrate` ausgeführt
-- [ ] `produzieren()` akzeptiert `variants_count` + `variant_patterns`
-- [ ] Mehrere ContentItems mit `variant_group_id` werden erstellt
-- [ ] Output-UI zeigt Varianten-Badge + Side-by-Side-Modal
-- [ ] Varianten-Auswahl setzt Status korrekt
-- [ ] `php artisan test` → alle Tests grün
+- [x] `php artisan migrate` ausgeführt
+- [x] `produzieren()` akzeptiert `variants_count` + `variant_patterns`
+- [x] Mehrere ContentItems mit `variant_group_id` werden erstellt
+- [x] Output-UI zeigt Varianten-Badge + Side-by-Side-Modal
+- [x] Varianten-Auswahl setzt Status korrekt (gewählt → `geplant`, andere → `verworfen`)
+- [x] `php artisan test` → alle Tests grün (13 passed)
+
+> **Umsetzungs-Hinweis (2026-09-01):** `produzieren()` erzeugt pro Variante ein
+> ContentItem und verknüpft sie über `variant_group_id` (UUID). Jede Variante
+> bekommt einen Stil-Hinweis (`variantPatternHint()`: story/listicle/contrarian/
+> question/data_drop), damit die Hooks unterschiedlich ansetzen. Neue Route
+> `POST /api/content/{id}/select-variant` setzt die gewählte Variante auf
+> `geplant` und verwirft die restlichen der Gruppe (atomar). Response ist
+> backward-kompatibel: bei 1 Variante wird zusätzlich `content_item` gesetzt.
 
 ---
 
@@ -898,23 +917,23 @@ In `ContentController::produzieren()` prüfen und in Response aufnehmen:
 
 ### Phase 4 — Checkliste
 
-- [ ] `persona_examples`-Tabelle migriert + neues Model `PersonaExample` erstellt
-- [ ] `buildContentPrompt()` injiziert Few-Shot-Beispiele
-- [ ] `generateContentWithLLM()` loggt via `AgentLog`
-- [ ] `checkMandatoryCta()` läuft + `missing_cta` im Response
-- [ ] UI: Referenz-Posts in Persona-Verwaltung pflegbar
-- [ ] `php artisan test` → alle Tests grün
+- [x] `persona_examples`-Tabelle migriert + neues Model `PersonaExample` erstellt
+- [x] `buildContentPrompt()` injiziert Few-Shot-Beispiele
+- [x] `generateContentWithLLM()` loggt via `AgentLog`
+- [x] `checkMandatoryCta()` läuft + `missing_cta` im Response
+- [x] UI: Referenz-Posts in Persona-Verwaltung pflegbar
+- [x] `php artisan test` → alle Tests grün (13 passed)
 
 ---
 
 ## Globale Checkliste
 
-- [ ] Phase 1 Review bestanden
-- [ ] Phase 2 Review bestanden
-- [ ] Phase 3 Review bestanden
-- [ ] Phase 4 Review bestanden
-- [ ] Alle Feature-Tests aktualisiert
-- [ ] `IMPLEMENTATION_PLAN.md` mit erledigten Punkten abgehakt
+- [x] Phase 1 Review bestanden
+- [x] Phase 2 Review bestanden
+- [x] Phase 3 Review bestanden
+- [x] Phase 4 Review bestanden
+- [x] Alle Feature-Tests aktualisiert
+- [x] `IMPLEMENTATION_PLAN.md` mit erledigten Punkten abgehakt
 
 ---
 

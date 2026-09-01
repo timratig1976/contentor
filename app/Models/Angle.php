@@ -16,6 +16,7 @@ class Angle extends Model
         'pain_cluster', 'statement_type', 'funnel', 'viscale_phase',
         'r_zielgruppe', 'r_viscale_fit', 'r_schaerfe', 'r_timing',
         'ranking_score', 'ranking_rang', 'status',
+        'embedding', 'score_reasoning', 'duplicate_of_id', 'similarity_score',
     ];
 
     protected $casts = [
@@ -25,6 +26,7 @@ class Angle extends Model
         'r_timing' => 'integer',
         'ranking_score' => 'integer',
         'ranking_rang' => 'integer',
+        'similarity_score' => 'float',
     ];
 
     public function strategy(): BelongsTo
@@ -54,8 +56,34 @@ class Angle extends Model
     public function updateRanking(): void
     {
         $this->ranking_score = $this->calculateScore();
+
+        // Auto-Approve: Score-Threshold aus Strategie-Config.
+        // null = frisch per create() erzeugt (DB-Default 'neu' noch nicht geladen).
+        if ($this->ranking_score !== null && in_array($this->status, [null, 'neu'], true)) {
+            $threshold = $this->autoApproveThreshold();
+            if ($threshold !== null && $this->ranking_score >= $threshold) {
+                $this->status = 'approved';
+            } else {
+                $this->status = 'bewertet';
+            }
+        }
+
         $this->save();
         static::recalculateRanks($this->strategy_id, $this->batch_key);
+    }
+
+    /**
+     * Liest den Auto-Approve-Threshold aus der Strategie-Config.
+     * Rückgabe null = immer manuelle Review.
+     */
+    public function autoApproveThreshold(): ?int
+    {
+        $config = $this->strategy?->config ?? [];
+        $value = $config['rules']['autoApproveScore']
+            ?? $config['brand_voice']['autoApproveScore']
+            ?? null;
+
+        return $value === null ? null : (int) $value;
     }
 
     public static function recalculateRanks(int $unitId, ?string $batchKey = null): void

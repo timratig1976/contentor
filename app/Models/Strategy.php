@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 
@@ -57,8 +58,10 @@ class Strategy extends Model
             // 5) Quellen
             $counts['sources'] = Source::where('strategy_id', $sid)->delete();
 
-            // 6) Personas
-            $counts['personas'] = Persona::where('strategy_id', $sid)->delete();
+            // 6) Persona-Mappings (Personas sind global → nur Pivot-Rows löschen)
+            $counts['personas'] = DB::table('persona_strategy_map')
+                ->where('strategy_id', $sid)
+                ->delete();
 
             // 7) Content-Strategie-Blöcke (Brand Voice, Kanal-Regeln, ...)
             $counts['content_strategies'] = ContentStrategy::where('strategy_id', $sid)->delete();
@@ -90,9 +93,16 @@ class Strategy extends Model
         return $this->hasMany(ContentMedia::class, 'strategy_id');
     }
 
-    public function personas(): HasMany
+    /**
+     * Globale Personas, die dieser Strategie zugeordnet sind (via pivot).
+     * Pivot-Felder: angles, topic_clusters, is_default (pro Strategie).
+     */
+    public function personas(): BelongsToMany
     {
-        return $this->hasMany(Persona::class, 'strategy_id');
+        return $this->belongsToMany(Persona::class, 'persona_strategy_map', 'strategy_id', 'persona_id')
+            ->using(PersonaStrategyMap::class)
+            ->withPivot(['mapped_angles', 'mapped_topics', 'is_default'])
+            ->withTimestamps();
     }
 
     public function redaktionsplanEntries(): HasMany

@@ -13,11 +13,9 @@ class PersonaFactory extends Factory
     public function definition(): array
     {
         return [
-            'strategy_id' => Strategy::factory(),
             'name' => fake()->name(),
             'role' => fake()->jobTitle(),
             'voice' => fake()->sentence(),
-            'topics' => [fake()->word(), fake()->word()],
             'cadence' => 'weekly',
             'active' => true,
         ];

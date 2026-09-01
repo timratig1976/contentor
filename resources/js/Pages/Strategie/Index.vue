@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -10,6 +10,68 @@ const saving = ref(false);
 const saved = ref(false);
 const showNewStrategy = ref(false);
 const newStrategyForm = reactive({ key: '', name: '' });
+
+// Strategie wechseln (Dropdown im Header)
+function switchStrategy(key) {
+    if (!key || key === props.currentStrategy?.key) return;
+    router.get('/strategie', { strategy: key }, { preserveScroll: true, onSuccess: () => router.reload() });
+}
+
+// ---- Persona-Mapping (globale Personas → Strategie) ----
+const mappedPersonas = ref([]);
+const allPersonas = ref([]);
+const mapLoading = ref(false);
+const showMapModal = ref(false);
+const mapForm = reactive({ persona_id: '', angles: [], topic_clusters: [] });
+
+async function loadPersonaMapping() {
+    if (!props.currentStrategy) return;
+    mapLoading.value = true;
+    try {
+        const [mapped, all] = await Promise.all([
+            fetch(`/api/strategies/${props.currentStrategy.id}/personas`).then(r => r.json()),
+            fetch('/api/personas').then(r => r.json()),
+        ]);
+        mappedPersonas.value = mapped;
+        allPersonas.value = all;
+    } finally {
+        mapLoading.value = false;
+    }
+}
+
+function openMapModal() {
+    mapForm.persona_id = '';
+    mapForm.angles = [];
+    mapForm.topic_clusters = [];
+    showMapModal.value = true;
+}
+
+async function attachPersona() {
+    if (!mapForm.persona_id) return;
+    await fetch(`/api/strategies/${props.currentStrategy.id}/personas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+        body: JSON.stringify({
+            persona_id: Number(mapForm.persona_id),
+            angles: mapForm.angles.filter(Boolean),
+            topic_clusters: mapForm.topic_clusters.filter(Boolean),
+        }),
+    });
+    showMapModal.value = false;
+    loadPersonaMapping();
+}
+
+async function detachPersona(personaId) {
+    if (!confirm('Diese Persona von der Strategie trennen? (Die Persona bleibt global erhalten.)')) return;
+    await fetch(`/api/strategies/${props.currentStrategy.id}/personas/${personaId}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+    });
+    loadPersonaMapping();
+}
+
+// Beim Öffnen der Personas-Seite laden
+watch(activeTab, (tab) => { if (tab === 'content_personas') loadPersonaMapping(); }, { immediate: true });
 
 // ---- Strategie löschen (fail-safe) ----
 const showDeleteStrategy = ref(false);
@@ -72,7 +134,6 @@ const forms = reactive({
     editorial_rhythm: { cadence: 'weekly', slots: [] },
     content_strategy: { pillars: [], goals: '' },
     post_templates: { templates: [] },
-    content_personas: { personas: [] },
 });
 
 props.contentKeys.forEach(s => {
@@ -87,7 +148,7 @@ const tabLabels = {
     editorial_rhythm: 'Redaktions-Rhythmus',
     content_strategy: 'Content-Strategie',
     post_templates: 'Post-Templates',
-    content_personas: 'Personen & Themen',
+    content_personas: 'Personas',
 };
 
 async function save() {
@@ -113,11 +174,45 @@ async function createStrategy() {
 }
 
 function addItem(key, field) { if (!forms[key][field]) forms[key][field] = []; forms[key][field].push(''); }
+
+// ---- Auto-Approve-Threshold (in strategy.config.rules) ----
+const autoApproveScore = ref(props.currentStrategy?.config?.rules?.autoApproveScore ?? null);
+const autoApproveSaving = ref(false);
+const autoApproveSaved = ref(false);
+
+async function saveAutoApprove() {
+    const strategy = props.currentStrategy;
+    if (!strategy || autoApproveSaving.value) return;
+
+    autoApproveSaving.value = true;
+    autoApproveSaved.value = false;
+
+    const config = { ...(strategy.config || {}) };
+    config.rules = { ...(config.rules || {}) };
+    if (autoApproveScore.value === null || autoApproveScore.value === '' || autoApproveScore.value === undefined) {
+        delete config.rules.autoApproveScore;
+    } else {
+        config.rules.autoApproveScore = Number(autoApproveScore.value);
+    }
+
+    try {
+        const res = await fetch(`/api/strategies/${strategy.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify({ config }),
+        });
+        if (res.ok) {
+            autoApproveSaved.value = true;
+            setTimeout(() => autoApproveSaved.value = false, 2000);
+        }
+    } finally {
+        autoApproveSaving.value = false;
+    }
+}
 function removeItem(key, field, index) { forms[key][field].splice(index, 1); }
 function addChannel() { forms.channel_rules.channels.push({ channel: 'linkedin', frequency: 'weekly', best_times: [], rules: [] }); }
 function addMapping() { forms.icp_channel_mapping.mappings.push({ icp: '', channels: [], priority: 'medium' }); }
 function addTemplate() { forms.post_templates.templates.push({ format: 'linkedin_post', name: '', structure: [], example: '' }); }
-function addStrategyPersona() { forms.content_personas.personas.push({ name: '', role: '', core_statements: [], tonality: { style: 'direkt', do: [], dont: [] }, topic_clusters: [], channels: [], positioning: '' }); }
 function addMediaRule() { forms.media_logic.rules.push({ format: 'image', style: '', aspect_ratio: '1:1', notes: '' }); }
 function addEditorialSlot() { forms.editorial_rhythm.slots.push({ day: 'Monday', channel: 'linkedin', format: 'post', persona: '' }); }
 function addPillar() { forms.content_strategy.pillars.push({ name: '', description: '', icp_focus: [] }); }
@@ -126,9 +221,17 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
 <template>
   <AppLayout>
     <div class="flex items-center justify-between mb-6">
-      <div>
+      <div class="flex items-center gap-4">
         <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Content-Strategie</h1>
-        <p class="text-sm text-gray-600 mt-1">Multi-Strategie-Verwaltung</p>
+        <!-- Aktive Strategie (Dropdown zum Wechseln) -->
+        <select
+          v-if="strategies.length"
+          :value="props.currentStrategy?.key"
+          @change="switchStrategy($event.target.value)"
+          class="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20">
+          <option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option>
+        </select>
+        <p v-if="props.currentStrategy" class="text-sm text-gray-400">· {{ props.currentStrategy.key }}</p>
       </div>
       <div class="flex items-center gap-2">
         <button @click="showDeleteStrategy = true" :disabled="!props.currentStrategy"
@@ -203,6 +306,30 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
           <div><label class="block text-sm text-gray-900 mb-1 font-medium">Tonalität</label><select v-model="forms.brand_voice.tone" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors"><option value="direkt">Direkt & klar</option><option value="beratend">Beratend</option><option value="provokativ">Provokativ</option><option value="inspirierend">Inspirierend</option><option value="analytisch">Analytisch</option></select></div>
           <div><label class="block text-sm text-gray-700 mb-2">🚫 Niemals verwenden</label><div class="space-y-2 mb-2"><div v-for="(item, i) in (forms.brand_voice.never || [])" :key="i" class="flex gap-2"><input v-model="forms.brand_voice.never[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="z.B. revolutionär" /><button @click="removeItem('brand_voice', 'never', i)" class="text-red-500 hover:text-red-700">✕</button></div></div><button @click="addItem('brand_voice', 'never')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Verbotenes Wort</button></div>
           <div><label class="block text-sm text-gray-700 mb-2">✅ Immer verwenden</label><div class="space-y-2 mb-2"><div v-for="(item, i) in (forms.brand_voice.must || [])" :key="i" class="flex gap-2"><input v-model="forms.brand_voice.must[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="z.B. Mechanismus" /><button @click="removeItem('brand_voice', 'must', i)" class="text-red-500 hover:text-red-700">✕</button></div></div><button @click="addItem('brand_voice', 'must')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Pflicht-Wort</button></div>
+        </div>
+      </div>
+
+      <!-- Scoring & Auto-Approve -->
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <h3 class="text-sm font-semibold text-gray-900 mb-4">Scoring & Auto-Approve</h3>
+        <div class="grid grid-cols-2 gap-4 items-end">
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Auto-Approve ab Score</label>
+            <input type="number" min="1" max="12" v-model.number="autoApproveScore"
+              class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
+              placeholder="z.B. 10 (max 12)" />
+            <p class="text-xs text-gray-500 mt-1">
+              Angles ab diesem Score werden automatisch auf „approved" gesetzt.
+              Leer lassen = immer manuelle Review.
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <button @click="saveAutoApprove" :disabled="autoApproveSaving"
+              class="px-4 py-2 bg-neu hover:bg-gray-300 text-gray-800 rounded-lg text-sm transition-colors disabled:opacity-50">
+              {{ autoApproveSaving ? 'Speichern…' : 'Speichern' }}
+            </button>
+            <span v-if="autoApproveSaved" class="text-xs text-green-600">✓ Gespeichert</span>
+          </div>
         </div>
       </div>
     </div>
@@ -282,21 +409,97 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
       </div>
     </div>
 
+    <!-- Personas: globale Personas dieser Strategie zuordnen (nicht anlegen) -->
     <div v-if="activeTab === 'content_personas'" class="space-y-5">
-      <div class="flex justify-between items-center"><h3 class="text-sm font-semibold text-gray-900">Content-Personas & Themen</h3><button @click="addStrategyPersona" class="neu-btn-primary px-4 py-2 text-sm">+ Persona</button></div>
-      <div v-for="(p, i) in (forms.content_personas.personas || [])" :key="i" class="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
-        <div class="flex items-center justify-between"><h4 class="text-gray-900 font-medium">Persona {{ i + 1 }}</h4><button @click="forms.content_personas.personas.splice(i, 1)" class="text-red-500 hover:text-red-700 text-sm">Löschen</button></div>
-        <div class="grid grid-cols-2 gap-4"><input v-model="p.name" class="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Name" /><input v-model="p.role" class="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Rolle (CEO, CMO)" /></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">Kernaussagen</label><div class="space-y-1.5 mb-1"><div v-for="(stmt, si) in (p.core_statements || [])" :key="si" class="flex gap-2"><input v-model="p.core_statements[si]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Kernaussage" /><button @click="p.core_statements.splice(si, 1)" class="text-red-500">✕</button></div></div><button @click="p.core_statements = [...(p.core_statements || []), '']" class="text-sm text-green-600 font-medium">+ Kernaussage</button></div>
-        <div class="grid grid-cols-2 gap-4"><div><label class="block text-sm text-gray-900 mb-1 font-medium">Tonalität</label><select v-model="p.tonality.style" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"><option value="direkt">Direkt</option><option value="beratend">Beratend</option><option value="provokativ">Provokativ</option><option value="analytisch">Analytisch</option><option value="visionaer">Visionär</option></select></div><div><label class="block text-sm text-gray-900 mb-1 font-medium">Positionierung</label><input v-model="p.positioning" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Thought Leader" /></div></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">✅ Do's</label><div class="space-y-1.5 mb-1"><div v-for="(d, di) in (p.tonality.do || [])" :key="di" class="flex gap-2"><input v-model="p.tonality.do[di]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" /><button @click="p.tonality.do.splice(di, 1)" class="text-red-500">✕</button></div></div><button @click="p.tonality.do = [...(p.tonality.do || []), '']" class="text-sm text-green-600 font-medium">+ Do</button></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">🚫 Don'ts</label><div class="space-y-1.5 mb-1"><div v-for="(d, di) in (p.tonality.dont || [])" :key="di" class="flex gap-2"><input v-model="p.tonality.dont[di]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" /><button @click="p.tonality.dont.splice(di, 1)" class="text-red-500">✕</button></div></div><button @click="p.tonality.dont = [...(p.tonality.dont || []), '']" class="text-sm text-green-600 font-medium">+ Don't</button></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">Themen-Cluster</label><div class="space-y-1.5 mb-1"><div v-for="(topic, ti) in (p.topic_clusters || [])" :key="ti" class="flex gap-2"><input v-model="p.topic_clusters[ti]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="CRM-Datenqualität" /><button @click="p.topic_clusters.splice(ti, 1)" class="text-red-500">✕</button></div></div><button @click="p.topic_clusters = [...(p.topic_clusters || []), '']" class="text-sm text-green-600 font-medium">+ Thema</button></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">Kanäle</label><div class="flex flex-wrap gap-2"><label v-for="ch in ['linkedin', 'newsletter', 'blog', 'meta_ads', 'linkedin_ads']" :key="ch" class="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" :value="ch" v-model="p.channels" class="rounded border-gray-300 text-green-600 focus:ring-2 focus:ring-green-500/20" /> {{ ch }}</label></div></div>
+      <div class="flex justify-between items-center">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-900">Personas für diese Strategie</h3>
+          <p class="text-xs text-gray-500 mt-1">Personas sind global. Hier ordnest du sie der Strategie zu und definierst die relevanten Angles & Themen-Cluster.</p>
+        </div>
+        <button @click="openMapModal" class="neu-btn-primary px-4 py-2 text-sm" :disabled="!allPersonas.length">+ Persona zuordnen</button>
+      </div>
+
+      <div v-if="mapLoading" class="text-sm text-gray-400">Lade Persona-Mapping…</div>
+
+      <div v-else-if="!mappedPersonas.length" class="bg-white border border-gray-200 rounded-xl p-8 text-center text-sm text-gray-500">
+        Keine Personas dieser Strategie zugeordnet.
+        <button @click="openMapModal" class="text-green-600 underline ml-1" :disabled="!allPersonas.length">Erste zuordnen</button>
+      </div>
+
+      <div v-else class="space-y-3">
+        <div v-for="p in mappedPersonas" :key="p.id" class="bg-white border border-gray-200 rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <span class="text-gray-900 font-medium">{{ p.name }}</span>
+              <span v-if="p.role" class="text-xs text-gray-500">{{ p.role }}</span>
+              <span v-if="p.pivot?.is_default" class="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">Default</span>
+            </div>
+            <button @click="detachPersona(p.id)" class="text-xs text-red-500 hover:text-red-700">Trennen</button>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Relevante Angles (diese Strategie)</label>
+              <div class="flex flex-wrap gap-1.5">
+                <span v-for="(a, i) in (p.pivot?.mapped_angles || [])" :key="i" class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{{ a.text || a }}</span>
+                <span v-if="!(p.pivot?.mapped_angles || []).length" class="text-xs text-gray-400 italic">Keine spezifischen Angles</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Themen-Cluster (diese Strategie)</label>
+              <div class="flex flex-wrap gap-1.5">
+                <span v-for="(t, i) in (p.pivot?.mapped_topics || [])" :key="i" class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{{ t }}</span>
+                <span v-if="!(p.pivot?.mapped_topics || []).length" class="text-xs text-gray-400 italic">Keine spezifischen Themen</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mapping-Modal -->
+      <div v-if="showMapModal" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="fixed inset-0 bg-black/40" @click="showMapModal = false"></div>
+        <div class="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg mx-4 z-10">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Persona dieser Strategie zuordnen</h3>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm text-gray-900 mb-1 font-medium">Persona</label>
+              <select v-model="mapForm.persona_id" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900">
+                <option value="" disabled>Persona wählen…</option>
+                <option v-for="p in allPersonas" :key="p.id" :value="p.id" :disabled="mappedPersonas.some(m => m.id === p.id)">
+                  {{ p.name }}{{ mappedPersonas.some(m => m.id === p.id) ? ' (bereits zugeordnet)' : '' }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-900 mb-1 font-medium">Relevante Angles (optional)</label>
+              <div class="space-y-1.5 mb-1">
+                <div v-for="(a, i) in mapForm.angles" :key="i" class="flex gap-2">
+                  <input v-model="mapForm.angles[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Angle-Text" />
+                  <button @click="mapForm.angles.splice(i, 1)" class="text-red-500">✕</button>
+                </div>
+              </div>
+              <button @click="mapForm.angles.push('')" class="text-sm text-green-600 font-medium">+ Angle</button>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-900 mb-1 font-medium">Themen-Cluster (optional)</label>
+              <div class="space-y-1.5 mb-1">
+                <div v-for="(t, i) in mapForm.topic_clusters" :key="i" class="flex gap-2">
+                  <input v-model="mapForm.topic_clusters[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Thema" />
+                  <button @click="mapForm.topic_clusters.splice(i, 1)" class="text-red-500">✕</button>
+                </div>
+              </div>
+              <button @click="mapForm.topic_clusters.push('')" class="text-sm text-green-600 font-medium">+ Thema</button>
+            </div>
+          </div>
+          <div class="flex gap-3 mt-5">
+            <button @click="attachPersona" :disabled="!mapForm.persona_id" class="neu-btn-primary px-4 py-2 text-sm disabled:opacity-40">Zuordnen</button>
+            <button @click="showMapModal = false" class="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Abbrechen</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="mt-6 flex items-center gap-3 pt-4 border-t border-gray-200">
+    <div v-if="activeTab !== 'content_personas'" class="mt-6 flex items-center gap-3 pt-4 border-t border-gray-200">
       <button @click="save" :disabled="saving" class="neu-btn-primary px-4 py-2 text-sm">{{ saving ? 'Speichert...' : '💾 Strategie speichern' }}</button>
       <span v-if="saved" class="text-sm text-green-600">✓ Gespeichert!</span>
     </div>

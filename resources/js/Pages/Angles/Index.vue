@@ -88,6 +88,7 @@ function scoreColor(score) {
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Funnel</th>
                         <th class="text-center px-6 py-3 text-xs font-medium text-gray-400 uppercase">Score</th>
                         <th class="text-center px-6 py-3 text-xs font-medium text-gray-400 uppercase">Rang</th>
+                        <th class="text-center px-6 py-3 text-xs font-medium text-gray-400 uppercase">Duplikat</th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Status</th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Unit</th>
                     </tr>
@@ -106,6 +107,14 @@ function scoreColor(score) {
                             <span class="text-lg font-bold" :class="scoreColor(angle.ranking_score)">{{ angle.ranking_score ?? '—' }}</span>
                         </td>
                         <td class="px-6 py-4 text-center text-sm text-gray-400">{{ angle.ranking_rang ?? '—' }}</td>
+                        <td class="px-6 py-4 text-center">
+                            <span v-if="angle.duplicate_of_id"
+                                class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full"
+                                :title="`Ähnlichkeit ${Math.round((angle.similarity_score || 0) * 100)}% zu ${angle.duplicate_of_id}`">
+                                ⚠ Ähnlich
+                            </span>
+                            <span v-else class="text-gray-300">—</span>
+                        </td>
                         <td class="px-6 py-4">
                             <span class="text-xs px-2 py-1 rounded-full"
                                 :class="{

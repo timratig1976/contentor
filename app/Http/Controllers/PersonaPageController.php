@@ -13,7 +13,7 @@ class PersonaPageController extends Controller
     {
         return Inertia::render('Personas/Index', [
             'strategies' => Strategy::all(),
-            'personas' => Persona::with('strategy')->get(),
+            'personas' => Persona::with(['strategies', 'strategy'])->get(),
         ]);
     }
 }

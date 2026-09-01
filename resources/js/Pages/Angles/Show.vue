@@ -141,6 +141,21 @@ const criteriaLabels = {
                     <div v-if="saving" class="text-xs text-gray-400 mt-2">Speichern...</div>
                 </div>
 
+                <!-- Score-Begründung -->
+                <div v-if="angle.score_reasoning" class="neu-card p-6">
+                    <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Scoring-Begründung</h3>
+                    <p class="text-sm text-gray-800 leading-relaxed">{{ angle.score_reasoning }}</p>
+                </div>
+
+                <!-- Duplikat-Hinweis -->
+                <div v-if="angle.duplicate_of_id" class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                    <p class="text-xs font-semibold text-yellow-700 mb-1">⚠ Mögliches Duplikat</p>
+                    <p class="text-sm text-yellow-700">
+                        Ähnlichkeit {{ Math.round((angle.similarity_score || 0) * 100) }}% zu
+                        <a :href="`/angles/${angle.duplicate_of_id}`" class="underline">{{ angle.duplicate_of_id }}</a>
+                    </p>
+                </div>
+
                 <!-- Produzieren -->
                 <div class="neu-card p-6">
                     <h3 class="text-lg font-semibold text-gray-800 mb-4">Produzieren</h3>
