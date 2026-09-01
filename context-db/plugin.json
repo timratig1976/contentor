@@ -1,0 +1,218 @@
+{
+  "hubId": "context-db",
+  "active": true,
+  "name": "Context DB",
+  "version": "1.0.0",
+  "description": "[Tool] Postgres Context-DB. Kunden, Projekte, SOP-Status, Kontext, Angles, Content, Medien, Strategien. Single Source of Truth.",
+  "author": "timratig",
+  "license": "viminds internal",
+  "examples": [
+    {
+      "prompt": "Zeige alle Kunden in der DB.",
+      "call": "{\"action\": \"list_kunden\"}"
+    },
+    {
+      "prompt": "Suche Kunde Müller GmbH.",
+      "call": "{\"action\": \"find_kunde\", \"name\": \"Müller\"}"
+    },
+    {
+      "prompt": "Erstelle Kunde Acme GmbH mit KKZ ACM.",
+      "call": "{\"action\": \"create_kunde\", \"name\": \"Acme GmbH\", \"kkz\": \"ACM\"}"
+    },
+    {
+      "prompt": "Speichere Strategie-Kontext für Projekt 5, Step V4.",
+      "call": "{\"action\": \"set_kontext\", \"projekt_id\": 5, \"step_code\": \"V4\", \"key\": \"strategie\", \"content\": \"...\"}"
+    }
+  ],
+  "setup_args": {
+    "DB_URL": {
+      "type": "string",
+      "required": true,
+      "input": {
+        "type": "text",
+        "default": "",
+        "placeholder": "postgresql://user:pass@host:5432/db",
+        "hint": "Desktop/Extern: postgresql://aicontext:***@ai.viminds.de:5433/context_db | Server/Intern: postgresql://aicontext:***@postgres-context:5432/context_db"
+      },
+      "value": "postgresql://aicontext:67omQO5jkD5C25AwZZ7XoAgipBXz6GFBqzDaMYhAS5j5Y5MloEUBJ2Z33SrX9cWb@ai.viminds.de:5433/context_db"
+    }
+  },
+  "entrypoint": {
+    "file": "handler.js",
+    "params": {
+      "action": {
+        "description": "debug | setup_schema | list_kunden | find_kunde | create_kunde | update_kunde | list_projekte | create_projekt | update_projekt | get_integrations | set_integrations | get_kontext | set_kontext | get_sop_run | advance_sop_step | list_dateien | register_datei | create_angle | list_angles | get_angle | update_angle | create_content_item | list_content_items | get_content_item | update_content_item | set_strategy | get_strategy | list_strategies | delete_strategy | create_media | list_media | get_media | update_media | delete_media | get_file",
+        "type": "string"
+      },
+      "name": {
+        "description": "Kundenname.",
+        "type": "string"
+      },
+      "kkz": {
+        "description": "Kunden-Kürzel (3 Buchstaben).",
+        "type": "string"
+      },
+      "id": {
+        "description": "Datensatz-ID.",
+        "type": "number"
+      },
+      "kunden_id": {
+        "description": "Kunden-ID.",
+        "type": "number"
+      },
+      "unit_id": {
+        "description": "Unit-ID (viscale|vitalents).",
+        "type": "string"
+      },
+      "typ": {
+        "description": "Projekt-Typ.",
+        "type": "string"
+      },
+      "projekt_id": {
+        "description": "Projekt-ID.",
+        "type": "number"
+      },
+      "step_code": {
+        "description": "SOP-Step-Code.",
+        "type": "string"
+      },
+      "key": {
+        "description": "Kontext-Schlüssel.",
+        "type": "string"
+      },
+      "keys": {
+        "description": "Mehrere Schlüssel als Array.",
+        "type": "string"
+      },
+      "content": {
+        "description": "Inhalt (Text/JSON).",
+        "type": "string"
+      },
+      "angle_id": {
+        "description": "Angle-ID (ANG-xxx).",
+        "type": "string"
+      },
+      "item_id": {
+        "description": "Content-Item-ID (CNT-xxx).",
+        "type": "string"
+      },
+      "angle": {
+        "description": "Angle-Text.",
+        "type": "string"
+      },
+      "format": {
+        "description": "linkedin_post|newsletter_bk|ad_copy|blog|lp_headline.",
+        "type": "string"
+      },
+      "title": {
+        "description": "Titel.",
+        "type": "string"
+      },
+      "owner": {
+        "description": "Owner (viscale|vitalents).",
+        "type": "string"
+      },
+      "live_date": {
+        "description": "YYYY-MM-DD.",
+        "type": "string"
+      },
+      "source": {
+        "description": "Quelle/Herkunft.",
+        "type": "string"
+      },
+      "notes": {
+        "description": "Notizen.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Max. Ergebnisse.",
+        "type": "number"
+      },
+      "strategy_key": {
+        "description": "brand_voice|channel_rules|icp_channel_mapping|media_logic|editorial_rhythm|content_strategy.",
+        "type": "string"
+      },
+      "media_id": {
+        "description": "Media-ID (MED-xxx).",
+        "type": "string"
+      },
+      "media_type": {
+        "description": "image|video|graphic|carousel_slide|ad_creative.",
+        "type": "string"
+      },
+      "prompt": {
+        "description": "Generierungs-Prompt.",
+        "type": "string"
+      },
+      "url": {
+        "description": "CDN-URL.",
+        "type": "string"
+      },
+      "integrations": {
+        "description": "JSON: {meta_ads_account_id, google_ads_customer_id, ...}",
+        "type": "string"
+      },
+      "hubspot_project_id": {
+        "description": "HubSpot Project-ID.",
+        "type": "string"
+      },
+      "hubspot_deal_id": {
+        "description": "HubSpot Deal-ID.",
+        "type": "string"
+      },
+      "drive_folder_id": {
+        "description": "Drive Folder-ID.",
+        "type": "string"
+      },
+      "drive_file_id": {
+        "description": "Drive File-ID.",
+        "type": "string"
+      },
+      "mime_type": {
+        "description": "MIME-Type.",
+        "type": "string"
+      },
+      "position": {
+        "description": "Position (0=erstes).",
+        "type": "number"
+      },
+      "generation_params": {
+        "description": "JSON mit Modell-Parametern.",
+        "type": "string"
+      },
+      "sop_run_id": {
+        "description": "SOP-Run-ID.",
+        "type": "number"
+      },
+      "completed_step_code": {
+        "description": "Abgeschlossener Step.",
+        "type": "string"
+      },
+      "next_step_code": {
+        "description": "Nächster Step.",
+        "type": "string"
+      },
+      "output_doc_id": {
+        "description": "Drive-Doc-ID.",
+        "type": "string"
+      },
+      "output_url": {
+        "description": "Publish-URL.",
+        "type": "string"
+      },
+      "hash": {
+        "description": "Content-Hash.",
+        "type": "string"
+      },
+      "status": {
+        "description": "aktiv|inaktiv|abgeschlossen.",
+        "type": "string"
+      },
+      "clickup_project_id": {
+        "description": "ClickUp Projekt-ID.",
+        "type": "string"
+      }
+    }
+  },
+  "imported": true
+}

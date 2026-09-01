@@ -1,0 +1,9 @@
+{
+  "name": "context-db",
+  "version": "1.0.0",
+  "description": "Postgres context DB skill for AnythingLLM",
+  "main": "handler.js",
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}

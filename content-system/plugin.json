@@ -1,0 +1,336 @@
+{
+  "hubId": "content-system",
+  "active": true,
+  "name": "Content System",
+  "version": "3.2.0",
+  "description": "[Tool] Content-System. Angles, Ideen, Posts, Redaktionsplan, Strategie, Medien in Postgres. Drive nur für Exporte.",
+  "author": "timratig",
+  "author_url": "https://hub.anythingllm.com/u/timratig",
+  "license": "viminds internal",
+  "examples": [
+    {
+      "prompt": "Starte einen geführten Content-Workflow.",
+      "call": "{\"action\": \"start_content\", \"input\": \"Ein falsch eingerichtetes CRM kostet mehr als gar keins.\", \"intent\": \"Angle entwickeln\"}"
+    },
+    {
+      "prompt": "Prüfe die Content-System-Konfiguration.",
+      "call": "{\"action\": \"debug\"}"
+    },
+    {
+      "prompt": "IDEE: Ein falsch eingerichtetes CRM kostet mehr als gar keins.",
+      "call": "{\"action\": \"idee\", \"input\": \"Ein falsch eingerichtetes CRM kostet mehr als gar keins.\"}"
+    },
+    {
+      "prompt": "IDEE für vitalents: Recruiting-Prozess bricht im letzten Schritt ab.",
+      "call": "{\"action\": \"idee\", \"input\": \"Recruiting-Prozess bricht im letzten Schritt ab.\", \"unit\": \"vitalents\"}"
+    },
+    {
+      "prompt": "Produziere einen LinkedIn-Post für einen validierten Angle.",
+      "call": "{\"action\": \"produzieren\", \"format\": \"linkedin_post\", \"angle\": \"Ein CRM ohne Mechanismus simuliert nur Sicherheit.\", \"icp\": \"B2B-2\", \"statement_type\": \"Direkt\", \"metric\": \"Von 3% auf 7% statt Blindflug im Forecast\"}"
+    },
+    {
+      "prompt": "Zeige mir den aktuellen Redaktionsplan.",
+      "call": "{\"action\": \"redaktionsplan\", \"mode\": \"show\"}"
+    },
+    {
+      "prompt": "Zeige mir den vitalents Redaktionsplan.",
+      "call": "{\"action\": \"redaktionsplan\", \"mode\": \"show\", \"unit\": \"vitalents\"}"
+    },
+    {
+      "prompt": "Führe einen Harvest der Ideas Inbox aus.",
+      "call": "{\"action\": \"harvest\", \"limit\": 5}"
+    },
+    {
+      "prompt": "Speichere einen validierten Angle in der Library.",
+      "call": "{\"action\": \"angle_speichern\", \"angle\": \"Ein CRM ohne Mechanismus simuliert nur Sicherheit.\", \"icp\": \"B2B-2\", \"pain_cluster\": \"Cluster 2 · E3-01 · Blindflug im Forecast\", \"statement_type\": \"Direkt\", \"channels\": [\"linkedin_organic\", \"newsletter\"]}"
+    },
+    {
+      "prompt": "Speichere den PDF-Inhalt als Angle + Faktbasis in der Content-System-DB (keine Datei!).",
+      "call": "{\"action\": \"angle_source_save\", \"angle\": \"HubSpot wird zum Cloud-Utility wie AWS — CRM-Kosten werden variabel\", \"icp\": \"B2B-2\", \"source\": \"hubspot-pricing-2025\", \"title\": \"HubSpot Pricing 2025 · Faktbasis\", \"notes\": \"Zusammenfassung der PDF-Analyse\", \"content\": \"<vollständige Faktbasis als Markdown/JSON>\"}"
+    },
+    {
+      "prompt": "Speichere das HubSpot Pricing PDF als Quelle in der DB.",
+      "call": "{\"action\": \"source_save\", \"title\": \"HubSpot New Pricing Slides (Partner Confidential)\", \"type\": \"pdf\", \"date\": \"2026-05\", \"file_ref\": \"hubspot_new_pricing_slides_2026-05.pdf\", \"visibility\": \"intern\", \"notes\": \"Nicht extern verwenden — Partner Confidential\"}"
+    },
+    {
+      "prompt": "Zeige alle Quellen für viscale.",
+      "call": "{\"action\": \"source_list\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Zeige alle Angles aus der Quelle SRC-XXXXXX.",
+      "call": "{\"action\": \"source_angles\", \"source_id\": \"SRC-XXXXXX\"}"
+    },
+    {
+      "prompt": "Zeige alle Angles aus dem Batch hubspot-pricing-2026-05.",
+      "call": "{\"action\": \"source_angles\", \"batch_key\": \"hubspot-pricing-2026-05\"}"
+    },
+    {
+      "prompt": "Bewerte Angle ANG-XXXXXX nach dem 4-Kriterien-Modell.",
+      "call": "{\"action\": \"rank_angle\", \"angle_id\": \"ANG-XXXXXX\", \"r_zielgruppe\": 3, \"r_viscale_fit\": 3, \"r_schaerfe\": 3, \"r_timing\": 3}"
+    },
+    {
+      "prompt": "Zeige das vollständige Ranking für den Batch hubspot-pricing-2026-05.",
+      "call": "{\"action\": \"rank_batch\", \"batch_key\": \"hubspot-pricing-2026-05\"}"
+    },
+    {
+      "prompt": "Zeige nur starke Angles (Score ≥ 10) aus dem Batch.",
+      "call": "{\"action\": \"rank_batch\", \"batch_key\": \"hubspot-pricing-2026-05\", \"min_score\": 10}"
+    },
+    {
+      "prompt": "Speichere Angle mit Source- und Batch-Verknüpfung.",
+      "call": "{\"action\": \"angle_speichern\", \"angle\": \"Wer Workflows nicht refaktoriert, zahlt pro Durchlauf drauf.\", \"icp\": \"B2B-2\", \"pain_cluster\": \"Cluster 5 · E3-05 · RevOps-Hygiene\", \"statement_type\": \"Direkt\", \"source_id\": \"SRC-XXXXXX\", \"batch_key\": \"hubspot-pricing-2026-05\", \"funnel\": \"MoFu\"}"
+    },
+    {
+      "prompt": "Erstelle einen BK-Newsletter-Draft.",
+      "call": "{\"action\": \"newsletter_bk\", \"mode\": \"draft\", \"topic\": \"Property-Hygiene · 3 Fehler die wir oft sehen\", \"sources\": [\"Support-Fragen\", \"Delivery-Best-Practice\"]}"
+    },
+    {
+      "prompt": "Migriere alte Ideas Inbox und Redaktionsplan Docs in die neuen Sheets.",
+      "call": "{\"action\": \"migrate\", \"source\": \"all\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Migriere bestehende Drive-Sheets in die DB.",
+      "call": "{\"action\": \"migrate_content\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Zeige alle Content-Items für viscale.",
+      "call": "{\"action\": \"list_content\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Exportiere Content-Item CNT-XYZ nach Drive.",
+      "call": "{\"action\": \"export_to_drive\", \"item_id\": \"CNT-XYZ\"}"
+    },
+    {
+      "prompt": "Gib mir einen Gesamtüberblick über das Content System für viscale.",
+      "call": "{\"action\": \"overview\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Was läuft gerade im Content System?",
+      "call": "{\"action\": \"overview\"}"
+    },
+    {
+      "prompt": "Starte die Content-Strategie-Session für viscale.",
+      "call": "{\"action\": \"strategy_session\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Speichere die Brand Voice für viscale.",
+      "call": "{\"action\": \"strategy_speichern\", \"strategy_key\": \"brand_voice\", \"content\": {\"personality\": \"Direkt, fordernd, beweisbasiert\", \"tone\": \"Kein Consulting-Speak\", \"always\": [\"Mit Beobachtung starten\", \"Konkrete Zahlen\"], \"never\": [\"Floskeln\", \"Superlative\"]}}"
+    },
+    {
+      "prompt": "Zeige mir die Brand Voice für viscale.",
+      "call": "{\"action\": \"strategy_abrufen\", \"strategy_key\": \"brand_voice\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Liste alle Strategie-Definitionen für viscale.",
+      "call": "{\"action\": \"strategy_list\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Lösche die media_logic für viscale.",
+      "call": "{\"action\": \"strategy_loeschen\", \"strategy_key\": \"media_logic\", \"unit\": \"viscale\"}"
+    },
+    {
+      "prompt": "Erstelle ein Medien-Briefing für CNT-ABC123.",
+      "call": "{\"action\": \"media_briefing\", \"item_id\": \"CNT-ABC123\", \"media_type\": \"image\", \"prompt\": \"Corporate style, dark tones, no text overlay\"}"
+    },
+    {
+      "prompt": "Zeige alle Medien für Content-Item CNT-ABC123.",
+      "call": "{\"action\": \"media_list\", \"item_id\": \"CNT-ABC123\"}"
+    },
+    {
+      "prompt": "Generiere das Bild für MED-XYZ789.",
+      "call": "{\"action\": \"media_generieren\", \"media_id\": \"MED-XYZ789\"}"
+    },
+    {
+      "prompt": "Markiere MED-XYZ789 als generiert mit URL.",
+      "call": "{\"action\": \"media_update\", \"media_id\": \"MED-XYZ789\", \"status\": \"generiert\", \"url\": \"https://fal.media/...\"}"
+    }
+  ],
+  "setup_args": {
+    "DRIVE_SCRIPT_URL": {
+      "type": "string",
+      "required": true,
+      "input": {
+        "type": "text",
+        "default": "",
+        "placeholder": "https://script.google.com/macros/s/.../exec",
+        "hint": "Apps Script URL für Drive-Operationen"
+      },
+      "value": "https://script.google.com/macros/s/AKfycbwG7LYsI52m9RymxxD2P1Xg9apYAUN9hu2lytzbkd9LeFt61Xxq-odoQU_7q5HvSImb/exec"
+    },
+    "DRIVE_TOKEN": {
+      "type": "string",
+      "required": true,
+      "input": {
+        "type": "text",
+        "default": "",
+        "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        "hint": "Token für Drive Apps Script"
+      },
+      "value": "ccdb0bd4-bbb6-4b07-85b8-3587e8f0746c"
+    },
+    "VIMINDS_PRODUCTS_ROOT_ID": {
+      "type": "string",
+      "required": true,
+      "input": {
+        "type": "text",
+        "default": "114CTBTNRUG-wIcyc08RdgREN-OlCdosh",
+        "placeholder": "114CTBTNRUG-wIcyc08RdgREN-OlCdosh",
+        "hint": "Viminds Products Root-Ordner. Der Skill sucht darunter automatisch [Unit] > Marketing & Sales > Content System und legt fehlende Ordner/Sheets an."
+      },
+      "value": "114CTBTNRUG-wIcyc08RdgREN-OlCdosh"
+    },
+    "DB_URL": {
+      "type": "string",
+      "required": false,
+      "input": {
+        "type": "text",
+        "default": "",
+        "placeholder": "postgresql://user:pass@host:5432/db",
+        "hint": "Optional: Postgres Context-DB für DB-First Content-Datenhaltung. Ohne diese URL läuft der Skill auf Drive-Fallback."
+      },
+      "value": "postgresql://aicontext:67omQO5jkD5C25AwZZ7XoAgipBXz6GFBqzDaMYhAS5j5Y5MloEUBJ2Z33SrX9cWb@ai.viminds.de:5433/context_db"
+    }
+  },
+  "entrypoint": {
+    "file": "handler.js",
+    "params": {
+      "action": {
+        "description": "Aktion des Skills. Verfügbar: debug, start_content, idee, produzieren, redaktionsplan, harvest, monitoring, angle_speichern, newsletter_bk, bk_newsletter, foundation_index, migrate, migrate_content, list_content, update_content, export_to_drive, overview, strategy_session, strategy_speichern, strategy_abrufen, strategy_list, strategy_loeschen, media_briefing, media_list, media_update, media_delete, media_generieren.",
+        "type": "string"
+      },
+      "input": {
+        "description": "Rohidee, URL, Zitat, Screenshot-Beschreibung oder Beobachtung für den IDEE-Workflow.",
+        "type": "string"
+      },
+      "icp": {
+        "description": "Optional oder erforderlich je Aktion. Werte: B2B-1, B2B-2, B2B-3, B2C, UNI, BK.",
+        "type": "string"
+      },
+      "source_type": {
+        "description": "Optional für idee. Werte wie wettbewerber, markt, kundenzitat, intern, hubspot, branche, beobachtung, url, screenshot.",
+        "type": "string"
+      },
+      "source_url": {
+        "description": "Optional für idee. URL eines Posts, Artikels oder Wettbewerber-Ads, der mitverarbeitet werden soll.",
+        "type": "string"
+      },
+      "statement_type": {
+        "description": "Optional. Werte: Direkt, Drastisch, Bedrohlich, Humorvoll, Sarkastisch, Gain.",
+        "type": "string"
+      },
+      "format": {
+        "description": "Für produzieren oder redaktionsplan. Werte: linkedin_post, ad_copy, newsletter_acquisition, landing_page_headlines, newsletter_bk.",
+        "type": "string"
+      },
+      "angle": {
+        "description": "Validierter Angle-Satz für produzieren oder angle_speichern.",
+        "type": "string"
+      },
+      "pain_cluster": {
+        "description": "Optional oder erforderlich je Aktion. Referenz auf Pain-Cluster und E3-Code.",
+        "type": "string"
+      },
+      "metric": {
+        "description": "Optional. Konkrete Zahl oder KPI mit Kontext.",
+        "type": "string"
+      },
+      "mechanism": {
+        "description": "Optional. Mechanismus oder Beweislast für das Asset.",
+        "type": "string"
+      },
+      "proofs": {
+        "description": "Optional. Liste von Beobachtungen oder Beweisen.",
+        "type": "string"
+      },
+      "kpis": {
+        "description": "Optional. Liste von KPI-Hinweisen.",
+        "type": "string"
+      },
+      "cta": {
+        "description": "Optional. Konkreter nächster Schritt oder Abschlussfrage.",
+        "type": "string"
+      },
+      "mode": {
+        "description": "Optional. Für redaktionsplan: show oder write. Für newsletter_bk: backlog oder draft.",
+        "type": "string"
+      },
+      "status": {
+        "description": "Optional. Status für Redaktionsplan oder Angle-Dokument.",
+        "type": "string"
+      },
+      "angle_short": {
+        "description": "Optional. Kurzform des Angles für den Redaktionsplan.",
+        "type": "string"
+      },
+      "owner": {
+        "description": "Optional. Verantwortliche Person oder Team.",
+        "type": "string"
+      },
+      "live_date": {
+        "description": "Optional. Live-Datum für den Redaktionsplan.",
+        "type": "string"
+      },
+      "link": {
+        "description": "Optional. Link zum Asset oder Dokument.",
+        "type": "string"
+      },
+      "channels": {
+        "description": "Optional. Liste empfohlener Kanäle beim Angle-Speichern.",
+        "type": "string"
+      },
+      "assets": {
+        "description": "Optional. Liste bereits produzierter Asset-Links.",
+        "type": "string"
+      },
+      "topic": {
+        "description": "Optional für newsletter_bk. Thema der Ausgabe.",
+        "type": "string"
+      },
+      "sources": {
+        "description": "Optional für newsletter_bk. Themenquellen für die Ausgabe.",
+        "type": "string"
+      },
+      "main_cta": {
+        "description": "Optional für newsletter_bk. Genau eine Hauptaktion der Ausgabe.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Optional für harvest. Maximale Anzahl Inbox-Einträge.",
+        "type": "number"
+      },
+      "competitors": {
+        "description": "Optional für monitoring. Liste relevanter Wettbewerber.",
+        "type": "string"
+      },
+      "phase_scope": {
+        "description": "Optional für newsletter_bk. Kennzeichnet, ob ein Thema für alle Phasen oder nur bestimmte Phasen relevant ist.",
+        "type": "string"
+      },
+      "unit": {
+        "description": "Optional. Unit-Key für alle Aktionen. Werte: viscale, vitalents. Default: viscale. Bestimmt Drive-Ordner, Regelwerk, Tonalität und Signatur.",
+        "type": "string"
+      },
+      "source": {
+        "description": "Nur für action=migrate. Werte: all (alles migrieren), ideas (nur Ideas Inbox), plan (nur Redaktionsplan). Default: all.",
+        "type": "string"
+      },
+      "strategy_key": {
+        "description": "Strategy-Key: brand_voice | channel_rules | icp_channel_mapping | media_logic | editorial_rhythm | content_strategy",
+        "type": "string"
+      },
+      "content": {
+        "description": "JSON-Inhalt für strategy_speichern. Enthält die Strategie-Definition als JSON-Objekt.",
+        "type": "string"
+      },
+      "interactive": {
+        "description": "Für strategy_session: true = interaktive Session mit Fragen.",
+        "type": "boolean"
+      }
+    }
+  },
+  "intent": {
+    "description": "Optional für start_content. Zum Beispiel Angle entwickeln, produzieren oder Plan aktualisieren.",
+    "type": "string"
+  },
+  "imported": true
+}

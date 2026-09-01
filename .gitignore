@@ -21,6 +21,13 @@
 /storage/*.key
 /storage/pail
 /vendor
+/content-app/vendor
+/content-app/node_modules
+/content-app/public/build
+/content-app/public/hot
+/content-app/storage/*.key
+/content-system/node_modules
+/context-db/node_modules
 _ide_helper.php
 Homestead.json
 Homestead.yaml
