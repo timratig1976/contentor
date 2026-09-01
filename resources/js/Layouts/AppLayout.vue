@@ -36,6 +36,7 @@ const navSections = [
 
 const bottomNav = [
     { name: 'Agents', href: '/agents', icon: '🤖' },
+    { name: 'Monitoring', href: '/monitoring', icon: '📡' },
     { name: 'Einstellungen', href: '/einstellungen', icon: '⚙️' },
 ];
 </script>

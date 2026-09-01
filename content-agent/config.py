@@ -41,3 +41,30 @@ AGENT_MODELS = {
         "max_tokens": int(os.getenv("COORDINATOR_MAX_TOKENS", "2000")),
     },
 }
+
+# Standard-Workflow-Loops (identisch zum Laravel-Fallback)
+DEFAULT_WORKFLOW_LOOPS = [
+    {
+        "name": "Qualitäts-Loop",
+        "from_agent": "review",
+        "to_agent": "production",
+        "condition": 'verdict = "fail"',
+        "max_rounds": 2,
+    },
+]
+
+
+def fetch_workflow_loops():
+    """Liest Workflow-Loops (Name, From→To, Bedingung, Max-Runden) aus der
+    Contentor-DB über die API. Fallback: DEFAULT_WORKFLOW_LOOPS."""
+    try:
+        import httpx
+
+        r = httpx.get(f"{CONTENT_API_URL}/settings", timeout=5)
+        r.raise_for_status()
+        loops = r.json().get("workflow_loops")
+        if isinstance(loops, list) and loops:
+            return loops
+    except Exception:
+        pass
+    return DEFAULT_WORKFLOW_LOOPS

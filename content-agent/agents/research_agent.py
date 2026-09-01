@@ -3,8 +3,6 @@ Research Agent — recherchiert Quellen, extrahiert Informationen,
 speichert sie in der Contentor-API und generiert erste Angles.
 """
 from haystack.components.agents import Agent
-from haystack_integrations.components.websearch.serperdev import SerperDevWebSearch
-from haystack.tools import ComponentTool
 
 from edenai_generator import EdenAIChatGenerator
 from tools.api_tools import (
@@ -12,15 +10,8 @@ from tools.api_tools import (
     create_angle, get_batch_ranking,
     create_content_idea, get_strategy_context,
 )
+from tools.web_search import web_search, scrape_page
 from config import CONTENT_STRATEGY, EDENAI_API_KEY, AGENT_MODELS
-
-# Web-Search-Tool
-web_search = SerperDevWebSearch(top_k=5)
-search_tool = ComponentTool(
-    component=web_search,
-    name="web_search",
-    description="Durchsuche das Web nach aktuellen Informationen, Artikeln, Studien und News zu einem Thema.",
-)
 
 mc = AGENT_MODELS["research"]
 
@@ -63,6 +54,8 @@ Persona aus dem Kontext (NIEMALS für alle Personas gleichzeitig generieren).
 - Fokussiere auf B2B-SaaS-Themen rund um CRM, Vertrieb und Prozesse
 - Angles sollen provokativ und meinungsstark sein (nicht neutral)
 - Maximal 3 Quellen pro Recherche
+- Für vielversprechende Treffer rufe scrape_page mit der URL auf,
+  um den vollständigen Artikel zu lesen und bessere Angles zu extrahieren
 - Gib am Ende eine Zusammenfassung der gefundenen Angles und ihres Rankings
 """
 
@@ -75,5 +68,5 @@ research_agent = Agent(
         max_tokens=mc["max_tokens"],
         system_prompt=RESEARCH_SYSTEM_PROMPT,
     ),
-    tools=[search_tool, get_strategy_context, create_source, list_sources, create_angle, get_batch_ranking, create_content_idea],
+    tools=[web_search, scrape_page, get_strategy_context, create_source, list_sources, create_angle, get_batch_ranking, create_content_idea],
 )

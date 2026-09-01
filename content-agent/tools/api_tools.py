@@ -48,6 +48,7 @@ def create_source(
     visibility: str = "intern",
     file_ref: str | None = None,
     batch_key: str | None = None,
+    url: str | None = None,
 ) -> dict:
     """Lege eine neue Recherche-Quelle an.
 
@@ -57,10 +58,13 @@ def create_source(
     :param visibility: Sichtbarkeit: intern, extern, partner
     :param file_ref: Dateireferenz (optional)
     :param batch_key: Batch-Key zur Gruppierung (optional)
+    :param url: URL der Quelle — bei Typ "url" IMMER angeben,
+        damit die Quelle später überwacht/gecrawlt werden kann
     """
     r = httpx.post(f"{CONTENT_API_URL}/sources", json={
         "title": title, "type": type, "strategy": strategy,
         "visibility": visibility, "file_ref": file_ref, "batch_key": batch_key,
+        "url": url,
     })
     r.raise_for_status()
     return r.json()

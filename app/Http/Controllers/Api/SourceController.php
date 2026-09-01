@@ -38,6 +38,7 @@ class SourceController extends Controller
             'visibility' => 'string|in:intern,extern,partner',
             'file_ref' => 'nullable|string',
             'batch_key' => 'nullable|string',
+            'url' => 'nullable|url',
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
@@ -49,6 +50,7 @@ class SourceController extends Controller
             'visibility' => $validated['visibility'] ?? 'intern',
             'file_ref' => $validated['file_ref'] ?? null,
             'batch_key' => $validated['batch_key'] ?? null,
+            'url' => $validated['url'] ?? null,
         ]);
 
         return response()->json($source, 201);
@@ -62,6 +64,44 @@ class SourceController extends Controller
             'source' => $source,
             'angles' => $angles,
             'total' => $angles->count(),
+        ]);
+    }
+
+    /**
+     * Quelle aktualisieren — inkl. Monitoring (URL, aktiv, Frequenz).
+     * Beim (Re-)Aktivieren von Monitoring: sofortiger Erst-Crawl.
+     */
+    public function update(Request $request, Source $source): JsonResponse
+    {
+        $validated = $request->validate([
+            'monitor' => 'sometimes|boolean',
+            'frequency' => 'sometimes|in:daily,weekly,biweekly',
+            'url' => 'sometimes|nullable|url',
+            'batch_key' => 'sometimes|nullable|string',
+        ]);
+
+        $wasMonitored = (bool) $source->monitor;
+        $source->update($validated);
+
+        $startedFreshCrawl = false;
+
+        // Neu überwacht (oder URL gewechselt) → sofort ersten Crawl ausführen
+        if (($validated['monitor'] ?? false) && (! $wasMonitored || isset($validated['url']))) {
+            app(\App\Services\SourceMonitorService::class)->checkSource($source->fresh());
+            $startedFreshCrawl = true;
+        } elseif (isset($validated['url']) && $source->monitor) {
+            $source->update(['content_hash' => null, 'last_checked_at' => null]);
+            app(\App\Services\SourceMonitorService::class)->checkSource($source->fresh());
+            $startedFreshCrawl = true;
+        }
+
+        if ($request->header('X-Inertia')) {
+            return redirect()->back();
+        }
+
+        return response()->json([
+            'source' => $source->fresh(),
+            'crawled' => $startedFreshCrawl,
         ]);
     }
 }

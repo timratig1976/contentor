@@ -10,7 +10,34 @@ from agents.research_agent import research_agent
 from agents.angle_agent import angle_agent
 from agents.production_agent import production_agent
 from agents.review_agent import review_agent
-from config import CONTENT_STRATEGY, EDENAI_API_KEY, AGENT_MODELS
+from config import CONTENT_STRATEGY, EDENAI_API_KEY, AGENT_MODELS, fetch_workflow_loops
+
+
+def _workflow_loops_config(loops):
+    """Erzeugt den loop-spezifischen Abschnitt des Coordinator-Prompts
+    aus den in der UI konfigurierten Loops (workflow_loops)."""
+    if not loops:
+        return (
+            "Keine Feedback-Loops konfiguriert. Führe den Workflow "
+            "strikt einmalig aus (Phase 1-4) und brich bei Fehlern ab."
+        )
+    lines = []
+    for i, l in enumerate(loops, 1):
+        frm = l.get("from_agent", "review")
+        to = l.get("to_agent", "production")
+        cond = l.get("condition") or "die Bedingung aus der UI-Konfiguration zutrifft"
+        lines.append(f"{i}. **{l.get('name') or 'Loop ' + str(i)}**")
+        lines.append(f"   - Prüfe nach `{frm}`, ob {cond}.")
+        lines.append(
+            f"   - Falls ja: rufe `{to}` ERNEUT auf und reiche das Feedback aus `{frm}` "
+            f"als zusätzlichen Kontext weiter. Danach wiederhole `{frm}`."
+        )
+        lines.append(
+            f"   - MAXIMAL {l.get('max_rounds', 1)} Überarbeitungsrunden. Falls danach die "
+            f"Bedingung immer noch zutrifft: brich ab, melde die offenen Issues dem "
+            f"Nutzer und frage, wie weiter."
+        )
+    return "\n".join(lines)
 
 # Jeden Sub-Agent als Tool verpacken
 research_tool = AgentTool(
@@ -37,6 +64,9 @@ review_tool = AgentTool(
     description="Prüfe produzierten Content gegen Brand Voice, Channel Rules und Qualitätskriterien. Gib konkretes Feedback und wende Verbesserungen an. Nutze dies nach der Content-Produktion.",
 )
 
+# Loops werden bei Import aus der UI-Konfiguration (workflow_loops) geladen
+_LOOP_CONFIG = _workflow_loops_config(fetch_workflow_loops())
+
 COORDINATOR_SYSTEM_PROMPT = f"""
 Du bist ein Content-Strategie-Koordinator für die Unit "{CONTENT_STRATEGY}".
 Du orchestrierst den gesamten Content-Produktions-Workflow von der Recherche
@@ -61,21 +91,12 @@ Für jede Anfrage durchläufst du diese Phasen:
 - Warte das Ergebnis jeder Phase ab, bevor du die nächste startest
 - Wenn eine Phase scheitert, brich ab und melde das Problem
 - Am Ende gib eine Zusammenfassung: Was wurde produziert, für welchen Kanal, mit welchem Score
+  Nenne dabei die durchlaufenen Runden/Loops (z. B. "Content nach 2 Iterationen freigegeben").
 - Frage den Nutzer, ob er zufrieden ist oder Änderungen wünscht
 
 ## QUALITÄTS-LOOP (Feedback-Iteration):
-Nach dem REVIEW prüfst du das Verdict:
-1. Lies den ```verdict-JSON-Block aus der Review-Antwort.
-2. Bei "verdict": "pass" → Workflow abgeschlossen, fasse zusammen.
-3. Bei "verdict": "fail" → starte ÜBERARBEITUNGSRUNDE:
-   - Rufe produce_content ERNEUT auf mit denselben Angles, aber reiche die
-     improvement_instructions aus dem Review als zusaetzlichen Kontext weiter
-     (z. B. ueber mechanism/metric/cta oder als Hinweis im Angle).
-   - Rufe danach review_content erneut auf.
-4. MAXIMAL 2 Überarbeitungsrunden. Wenn danach immer noch "fail":
-   brich ab, melde die offenen issues dem Nutzer und frage, wie weiter.
-- Zähle die Runden mit und nenne sie in der Zusammenfassung
-  (z. B. "Content nach 2 Iterationen freigegeben").
+_Loop-Konfiguration (aus der UI):_
+{_LOOP_CONFIG}
 
 ## Content-Formate:
 - linkedin_post: Thought-Leadership-Post

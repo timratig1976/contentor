@@ -5,6 +5,7 @@ use App\Http\Controllers\AnglePageController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EinstellungenPageController;
 use App\Http\Controllers\MediaPageController;
+use App\Http\Controllers\MonitoringPageController;
 use App\Http\Controllers\NewsletterPageController;
 use App\Http\Controllers\OutputPageController;
 use App\Http\Controllers\PersonaPageController;
@@ -26,4 +27,5 @@ Route::get('/strategie', [StrategyPageController::class, 'index'])->name('strate
 Route::get('/medien', [MediaPageController::class, 'index'])->name('medien');
 Route::get('/newsletter', [NewsletterPageController::class, 'index'])->name('newsletter');
 Route::get('/agents', [AgentsPageController::class, 'index'])->name('agents');
+Route::get('/monitoring', [MonitoringPageController::class, 'index'])->name('monitoring');
 Route::get('/einstellungen', [EinstellungenPageController::class, 'index'])->name('einstellungen');

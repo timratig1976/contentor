@@ -13,7 +13,13 @@ class Source extends Model
 
     protected $fillable = [
         'id', 'strategy_id', 'title', 'type', 'visibility',
-        'file_ref', 'batch_key',
+        'file_ref', 'batch_key', 'url', 'monitor', 'frequency',
+        'last_checked_at', 'content_hash', 'last_content_preview',
+    ];
+
+    protected $casts = [
+        'monitor' => 'boolean',
+        'last_checked_at' => 'datetime',
     ];
 
     public function strategy(): BelongsTo

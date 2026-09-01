@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -10,6 +10,59 @@ const saving = ref(false);
 const saved = ref(false);
 const showNewStrategy = ref(false);
 const newStrategyForm = reactive({ key: '', name: '' });
+
+// ---- Strategie löschen (fail-safe) ----
+const showDeleteStrategy = ref(false);
+const deleting = ref(false);
+const deleteError = ref('');
+
+// Zählt alles, was zusammen mit der Strategie gelöscht wird.
+const deleteTotals = computed(() => {
+    const s = props.currentStrategy;
+    if (!s) return null;
+    return {
+        sources: s.sources_count || 0,
+        angles: s.angles_count || 0,
+        content_items: s.content_items_count || 0,
+        content_media: s.media_count || 0,
+        personas: s.personas_count || 0,
+        redaktionsplan: s.redaktionsplan_entries_count || 0,
+        content_strategies: s.content_strategies_count || 0,
+    };
+});
+
+async function confirmDeleteStrategy() {
+    const strategy = props.currentStrategy;
+    if (!strategy || deleting.value) return;
+
+    deleting.value = true;
+    deleteError.value = '';
+    try {
+        const res = await fetch(`/api/strategies/${strategy.id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            deleteError.value = data.message || 'Strategie konnte nicht gelöscht werden. Bitte versuche es erneut.';
+            return;
+        }
+
+        showDeleteStrategy.value = false;
+
+        // Nach dem Löschen zur nächsten verbleibenden Strategie wechseln
+        // (oder auf die Strategie-Seite, falls keine mehr existiert).
+        router.get('/strategie', data.next_strategy_key ? { strategy: data.next_strategy_key } : {}, {
+            preserveScroll: true,
+            onSuccess: () => router.reload(),
+        });
+    } catch {
+        deleteError.value = 'Verbindungsfehler beim Löschen.';
+    } finally {
+        deleting.value = false;
+    }
+}
 
 const forms = reactive({
     brand_voice: { personality: '', tone: 'direkt', never: [], must: [] },
@@ -77,9 +130,51 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
         <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Content-Strategie</h1>
         <p class="text-sm text-gray-600 mt-1">Multi-Strategie-Verwaltung</p>
       </div>
-      <button @click="showNewStrategy = true" class="neu-btn-primary px-4 py-2 text-sm">+ Neue Strategie</button>
+      <div class="flex items-center gap-2">
+        <button @click="showDeleteStrategy = true" :disabled="!props.currentStrategy"
+          class="px-4 py-2 text-sm rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+          🗑 Strategie löschen
+        </button>
+        <button @click="showNewStrategy = true" class="neu-btn-primary px-4 py-2 text-sm">+ Neue Strategie</button>
+      </div>
     </div>
 
+    <!-- Lösch-Dialog (fail-safe) -->
+    <div v-if="showDeleteStrategy && props.currentStrategy" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div class="fixed inset-0 bg-black/40" @click="!deleting && (showDeleteStrategy = false)"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4 z-10">
+        <h3 class="text-lg font-semibold text-red-600 mb-1">Strategie endgültig löschen?</h3>
+        <p class="text-sm text-gray-600 mb-4">
+          „{{ props.currentStrategy.name }}“ wird <strong>endgültig</strong> zusammen mit allen zugehörigen Daten gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.
+        </p>
+        <div v-if="deleteTotals" class="bg-red-50 border border-red-100 rounded-lg p-3 mb-4 text-sm text-gray-700">
+          <p class="font-medium mb-2">Das wird mitgelöscht:</p>
+          <ul class="space-y-1">
+            <li v-if="deleteTotals.content_strategies" class="flex justify-between"><span>Content-Strategie-Blöcke</span><span class="font-medium">{{ deleteTotals.content_strategies }}</span></li>
+            <li v-if="deleteTotals.personas" class="flex justify-between"><span>Personas</span><span class="font-medium">{{ deleteTotals.personas }}</span></li>
+            <li v-if="deleteTotals.redaktionsplan" class="flex justify-between"><span>Redaktionsplan-Einträge</span><span class="font-medium">{{ deleteTotals.redaktionsplan }}</span></li>
+            <li v-if="deleteTotals.content_items" class="flex justify-between"><span>Content-Items</span><span class="font-medium">{{ deleteTotals.content_items }}</span></li>
+            <li v-if="deleteTotals.content_media" class="flex justify-between"><span>Medien</span><span class="font-medium">{{ deleteTotals.content_media }}</span></li>
+            <li v-if="deleteTotals.angles" class="flex justify-between"><span>Angles</span><span class="font-medium">{{ deleteTotals.angles }}</span></li>
+            <li v-if="deleteTotals.sources" class="flex justify-between"><span>Quellen</span><span class="font-medium">{{ deleteTotals.sources }}</span></li>
+            <li v-if="!Object.values(deleteTotals).some(v => v > 0)" class="text-gray-500 italic">Keine verknüpften Daten vorhanden.</li>
+          </ul>
+        </div>
+        <p v-if="deleteError" class="text-sm text-red-600 mb-3">{{ deleteError }}</p>
+        <div class="flex gap-3">
+          <button @click="confirmDeleteStrategy" :disabled="deleting"
+            class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
+            {{ deleting ? 'Wird gelöscht…' : 'Endgültig löschen' }}
+          </button>
+          <button @click="showDeleteStrategy = false" :disabled="deleting"
+            class="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+            Abbrechen
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <template v-if="props.currentStrategy">
     <div class="flex gap-1 mb-6 overflow-x-auto">
       <button v-for="(label, key) in tabLabels" :key="key" @click="activeTab = key"
         class="px-3 py-1.5 rounded-lg text-sm whitespace-nowrap font-medium"
@@ -204,6 +299,14 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
     <div class="mt-6 flex items-center gap-3 pt-4 border-t border-gray-200">
       <button @click="save" :disabled="saving" class="neu-btn-primary px-4 py-2 text-sm">{{ saving ? 'Speichert...' : '💾 Strategie speichern' }}</button>
       <span v-if="saved" class="text-sm text-green-600">✓ Gespeichert!</span>
+    </div>
+    </template>
+
+    <div v-else class="bg-white border border-gray-200 rounded-xl p-10 text-center">
+      <p class="text-4xl mb-3">🧠</p>
+      <h2 class="text-lg font-medium text-gray-900 mb-1">Noch keine Strategie vorhanden</h2>
+      <p class="text-sm text-gray-600 mb-4">Lege oben mit „+ Neue Strategie“ deine erste Content-Strategie an.</p>
+      <button @click="showNewStrategy = true" class="neu-btn-primary px-4 py-2 text-sm">+ Neue Strategie</button>
     </div>
   </AppLayout>
 </template>

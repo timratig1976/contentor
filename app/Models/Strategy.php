@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Strategy extends Model
 {
@@ -17,6 +18,57 @@ class Strategy extends Model
     protected $casts = [
         'config' => 'array',
     ];
+
+    /**
+     * Löscht die Strategie KASKADENHAFT zusammen mit ALLEN zugehörigen Daten.
+     *
+     * Fail-safe:
+     *  - Läuft atomar in einer Transaktion (alles oder nichts).
+     *  - Löscht die Kinder explizit in topologischer Reihenfolge, unabhängig
+     *    davon, ob der Dialekt (z. B. SQLite) ON DELETE CASCADE unterstützt.
+     *  - Wird bei einem Fehler zurückgerollt -> kein Teilzustand.
+     *
+     * @return array<string,int> Anzahl gelöschter Zeilen pro Tabelle
+     */
+    public function deleteCascade(): array
+    {
+        return DB::transaction(function () {
+            $sid = $this->id;
+            $counts = [];
+
+            // 1) Content-Medien (hängt von content_items ab)
+            $counts['content_media'] = ContentMedia::whereIn(
+                'content_item_id',
+                ContentItem::where('strategy_id', $sid)->select('id')
+            )->delete();
+
+            // 2) Redaktionsplan (hängt von content_items ab)
+            $counts['redaktionsplan_entries'] = RedaktionsplanEntry::whereIn(
+                'content_item_id',
+                ContentItem::where('strategy_id', $sid)->select('id')
+            )->delete();
+
+            // 3) Content-Items
+            $counts['content_items'] = ContentItem::where('strategy_id', $sid)->delete();
+
+            // 4) Angles
+            $counts['angles'] = Angle::where('strategy_id', $sid)->delete();
+
+            // 5) Quellen
+            $counts['sources'] = Source::where('strategy_id', $sid)->delete();
+
+            // 6) Personas
+            $counts['personas'] = Persona::where('strategy_id', $sid)->delete();
+
+            // 7) Content-Strategie-Blöcke (Brand Voice, Kanal-Regeln, ...)
+            $counts['content_strategies'] = ContentStrategy::where('strategy_id', $sid)->delete();
+
+            // 8) Die Strategie selbst
+            $this->delete();
+
+            return $counts;
+        });
+    }
 
     public function sources(): HasMany
     {

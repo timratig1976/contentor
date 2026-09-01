@@ -1,9 +1,9 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-const props = defineProps({ settings: Object, strategies: Object, agentPrompts: Object, agentModels: Object, stats: Object, agentLogs: Array, personas: Array });
+const props = defineProps({ settings: Object, strategies: Object, agentPrompts: Object, agentModels: Object, stats: Object, agentLogs: Array, personas: Array, workflowLoops: Array });
 
 const activeAgent = ref(null);
 const detailTab = ref('prompt');
@@ -31,6 +31,91 @@ const models = reactive({
     production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-3-5-sonnet-20240620' },
     review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o' },
     coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o' },
+});
+
+// ─── Workflow & Loops ───────────────────────────────────────────────────
+const workflowTabs = ['loops', 'workflow'];
+const workflowTab = ref('loops');
+const loopsSaving = ref(false);
+const loopsSaved = ref(false);
+
+const defaultLoops = [
+    { id: 'review-rework', name: 'Qualitäts-Loop', from_agent: 'review', to_agent: 'production', condition: 'verdict = "fail"', max_rounds: 2 },
+];
+
+const loops = ref((props.workflowLoops || defaultLoops).map(l => ({ ...l })));
+
+// Sicherstellen, dass von der API kommende max_rounds als Number parsbar ist
+function clampRounds(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(10, Math.max(1, Math.round(n)));
+}
+function setLoopRounds(l, v) { l.max_rounds = clampRounds(v); }
+
+function newLoopId() { return 'loop-' + Math.random().toString(36).slice(2, 8); }
+function addLoop() {
+    loops.value.push({ id: newLoopId(), name: '', from_agent: 'review', to_agent: 'production', condition: '', max_rounds: 1 });
+}
+function removeLoop(id) { loops.value = loops.value.filter(l => l.id !== id); }
+function moveLoop(id, dir) {
+    const i = loops.value.findIndex(l => l.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= loops.value.length) return;
+    [loops.value[i], loops.value[j]] = [loops.value[j], loops.value[i]];
+}
+async function saveLoops() {
+    loopsSaving.value = true; loopsSaved.value = false;
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+            body: JSON.stringify({ key: 'workflow_loops', value: loops.value }),
+        });
+        if (res.ok) { loopsSaved.value = true; setTimeout(() => loopsSaved.value = false, 2000); }
+        else alert('Speichern fehlgeschlagen: HTTP ' + res.status);
+    } catch (e) { alert('Fehler: ' + e.message); }
+    finally { loopsSaving.value = false; }
+}
+function agentLabel(key) { return agents[key]?.name || key; }
+
+// Workflow-Definition: feste Phasen + dynamische Loops (generierbarer Text für den Coordinator)
+const workflowPhases = computed(() => [
+    { agent: 'research', label: 'RESEARCH', desc: 'Thema recherchieren, Quellen speichern' },
+    { agent: 'angle', label: 'DEVELOP', desc: 'Angles bewerten & ranken' },
+    { agent: 'production', label: 'PRODUCE', desc: 'Content aus Top-Angles produzieren' },
+    { agent: 'review', label: 'REVIEW', desc: 'Qualität prüfen & Feedback geben' },
+]);
+const workflowSummary = computed(() => {
+    const lines = workflowPhases.value.map((p, i) => `  ${i + 1}. ${p.label} → ${agentLabel(p.agent)}`);
+    loops.value.forEach(l => {
+        if (!l.name) return;
+        const cond = l.condition ? `, wenn ${l.condition}` : '';
+        lines.push(`  ↻ ${l.name}: ${agentLabel(l.from_agent)} → ${agentLabel(l.to_agent)} (max. ${l.max_rounds} Runde${l.max_rounds > 1 ? 'n' : ''}${cond})`);
+    });
+    return lines.join('\n');
+});
+const workflowText = computed(() =>
+    'Workflow:\n' + workflowSummary.value +
+    '\n\nRegeln:\n' +
+    '- Phasen in der Reihenfolge ausführen, Ergebnis einer Phase abwarten\n' +
+    '- Bei Fehlern abbrechen und das Problem melden' +
+    (loops.value.length
+        ? '\n- Bei Loop-Erreichen ohne Erfolg: abbrechen und offene Issues melden'
+        : ''));
+const workflowCopied = ref(false);
+async function copyWorkflow() {
+    try { await navigator.clipboard.writeText(workflowText.value); } catch { /* Fallback unten */ }
+    workflowCopied.value = true;
+    setTimeout(() => workflowCopied.value = false, 1500);
+}
+
+onMounted(() => {
+    // Fallback für ältere Seeds: Defaults mitnehmen, wenn nichts gesetzt
+    if (!loops.value.length) loops.value = defaultLoops.map(l => ({ ...l }));
 });
 
 // Auto-Save bei Änderungen
@@ -192,6 +277,104 @@ function toggleLog(id) {
                     <h3 class="text-sm font-medium text-gray-800 mb-2">Workflow starten</h3>
                     <code class="text-xs text-gray-400 bg-neu px-3 py-2 rounded-md block">cd content-agent && python3 main.py</code>
                     <p class="text-xs text-gray-400 mt-2">Ergebnisse: <a href="/quellen" class="text-gray-400 hover:text-gray-800">Quellen</a> · <a href="/angles" class="text-gray-400 hover:text-gray-800">Angles</a> · <a href="/redaktionsplan" class="text-gray-400 hover:text-gray-800">Redaktionsplan</a></p>
+                </div>
+
+                <!-- WORKFLOW & LOOPS -->
+                <div class="neu-card p-5 mt-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex gap-1">
+                            <button v-for="t in workflowTabs" :key="t" @click="workflowTab = t"
+                                class="px-3 py-1.5 rounded-lg text-sm"
+                                :class="workflowTab === t ? 'bg-neu text-gray-800 font-medium' : 'text-gray-400 hover:text-gray-800 hover:bg-neu'">
+                                {{ t === 'loops' ? 'Loops' : 'Workflow' }}
+                            </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span v-if="loopsSaved" class="text-xs text-green-600">✓ Gespeichert</span>
+                            <button @click="saveLoops" :disabled="loopsSaving"
+                                class="px-3 py-1.5 bg-neu text-white rounded-lg text-xs hover:bg-neu disabled:opacity-50">
+                                {{ loopsSaving ? 'Wird gespeichert…' : 'Speichern' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Phase-Übersicht (kompakt) -->
+                    <div class="flex items-center gap-2 mb-4 flex-wrap">
+                        <template v-for="(p, i) in workflowPhases" :key="p.agent">
+                            <span class="text-xs px-2.5 py-1 rounded-full bg-neu text-gray-800">{{ i + 1 }} · {{ p.label }}</span>
+                            <span v-if="i < workflowPhases.length - 1" class="text-gray-300 text-xs">→</span>
+                        </template>
+                        <span v-if="loops.length" class="text-xs text-gray-400 pl-1">+ {{ loops.length }} Loop{{ loops.length > 1 ? 's' : '' }}</span>
+                    </div>
+
+                    <!-- Loops verwalten -->
+                    <div v-if="workflowTab === 'loops'">
+                        <p class="text-xs text-gray-400 mb-3">
+                            Ein Loop schickt den Workflow <strong>zurück</strong>, wenn eine Bedingung erfüllt ist
+                            — z. B. prüft Review den Content und bei "fail" produziert Production erneut.
+                        </p>
+                        <div class="space-y-3">
+                            <div v-for="(l, idx) in loops" :key="l.id" class="neu-card-sm p-4">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-lg">↻</span>
+                                    <input v-model="l.name" class="flex-1 bg-neu text-sm border-0 px-3 py-1.5 rounded-lg text-gray-800 focus:outline-none focus:border-gray-400"
+                                        placeholder="Name (z. B. Qualitäts-Loop)" />
+                                    <button @click="moveLoop(l.id, -1)" :disabled="idx === 0"
+                                        class="text-gray-300 hover:text-gray-800 disabled:opacity-30 text-sm">↑</button>
+                                    <button @click="moveLoop(l.id, 1)" :disabled="idx === loops.length - 1"
+                                        class="text-gray-300 hover:text-gray-800 disabled:opacity-30 text-sm">↓</button>
+                                    <button @click="removeLoop(l.id)" class="text-red-300 hover:text-red-600 text-sm px-1">✕</button>
+                                </div>
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                                    <div>
+                                        <label class="block text-xs text-gray-400 mb-1">Von (prüfender Agent)</label>
+                                        <select v-model="l.from_agent" class="w-full bg-neu text-sm border-0 px-2 py-1.5 rounded-lg text-gray-800 focus:outline-none focus:border-gray-400">
+                                            <option v-for="(info, key) in agents" :key="key" :value="key">{{ info.name }}</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-400 mb-1">Zurück zu</label>
+                                        <select v-model="l.to_agent" class="w-full bg-neu text-sm border-0 px-2 py-1.5 rounded-lg text-gray-800 focus:outline-none focus:border-gray-400">
+                                            <option v-for="(info, key) in agents" :key="key" :value="key" :disabled="key === l.from_agent">{{ info.name }}</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-span-2">
+                                        <label class="block text-xs text-gray-400 mb-1">Bedingung (Trigger)</label>
+                                        <input v-model="l.condition" class="w-full bg-neu text-sm border-0 px-3 py-1.5 rounded-lg text-gray-800 font-mono focus:outline-none focus:border-gray-400"
+                                            placeholder='z. B. verdict = "fail"' />
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-400 mb-1">Max. Runden</label>
+                                        <div class="flex items-center gap-2">
+                                            <button @click="setLoopRounds(l, l.max_rounds - 1)" class="w-8 h-8 rounded-lg bg-neu text-gray-600 hover:bg-neu">−</button>
+                                            <span class="w-8 text-center text-sm font-semibold text-gray-800">{{ l.max_rounds }}</span>
+                                            <button @click="setLoopRounds(l, l.max_rounds + 1)" class="w-8 h-8 rounded-lg bg-neu text-gray-600 hover:bg-neu">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="col-span-3 sm:col-span-3">
+                                        <p class="text-xs text-gray-400">
+                                            {{ agentLabel(l.from_agent) }} prüft → wenn <code class="text-gray-600">{{ l.condition || '…' }}</code> → {{ agentLabel(l.to_agent) }} erneut. Max. <strong class="text-gray-800">{{ l.max_rounds }}</strong> Runde{{ l.max_rounds > 1 ? 'n' : '' }}, danach Abbruch.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button @click="addLoop" class="w-full py-3 rounded-lg border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:text-gray-800 hover:border-gray-300 transition-colors">
+                                + Loop hinzufügen
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Workflow-Vorschau -->
+                    <div v-if="workflowTab === 'workflow'">
+                        <div class="flex items-center justify-between mb-3">
+                            <p class="text-xs text-gray-400">Generierte Workflow-Definition (lässt sich in den Coordinator-Prompt kopieren):</p>
+                            <button @click="copyWorkflow" class="px-3 py-1.5 bg-neu text-white rounded-lg text-xs hover:bg-neu">
+                                {{ workflowCopied ? '✓ Kopiert' : 'Kopieren' }}
+                            </button>
+                        </div>
+                        <pre class="bg-neu text-gray-800 text-xs rounded-lg p-4 whitespace-pre-wrap leading-relaxed">{{ workflowText }}</pre>
+                    </div>
                 </div>
             </div>
 

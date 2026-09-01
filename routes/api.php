@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\EdenAIModelsController;
 use App\Http\Controllers\Api\AngleController;
 use App\Http\Controllers\Api\ContentController;
 use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\MonitoringController;
 use App\Http\Controllers\Api\NewsletterController;
 use App\Http\Controllers\Api\PersonaController;
 use App\Http\Controllers\Api\QuickInputController;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Route;
 // Quellen
 Route::post('/sources', [SourceController::class, 'store']);
 Route::get('/sources', [SourceController::class, 'index']);
+Route::patch('/sources/{source}', [SourceController::class, 'update']);
 Route::get('/sources/{source}/angles', [SourceController::class, 'angles']);
 
 // Angles
@@ -89,3 +91,9 @@ Route::get('/strategies', [StrategyCrudController::class, 'index']);
 Route::post('/strategies', [StrategyCrudController::class, 'store']);
 Route::patch('/strategies/{strategy}', [StrategyCrudController::class, 'update']);
 Route::delete('/strategies/{strategy}', [StrategyCrudController::class, 'destroy']);
+
+// Monitoring (Quellen-Crawls, Event-Feed, Test-Suche)
+Route::get('/monitoring', [MonitoringController::class, 'index']);
+Route::post('/monitoring/run', [MonitoringController::class, 'run']);
+Route::post('/monitoring/sources/{source}/check', [MonitoringController::class, 'checkSource']);
+Route::post('/monitoring/test-search', [MonitoringController::class, 'testSearch']);
