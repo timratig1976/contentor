@@ -94,13 +94,17 @@ class StrategyDeleteCascadeTest extends TestCase
         $this->assertSame(0, Angle::where('strategy_id', $strategy->id)->count());
         $this->assertSame(0, ContentItem::where('strategy_id', $strategy->id)->count());
         $this->assertSame(0, ContentMedia::where('strategy_id', $strategy->id)->count());
-        $this->assertSame(0, Persona::where('strategy_id', $strategy->id)->count());
+        // Personas sind global → nur das Mapping zur gelöschten Strategie wird entfernt
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('persona_strategy_map')->where('strategy_id', $strategy->id)->count());
         $this->assertSame(0, RedaktionsplanEntry::where('strategy_id', $strategy->id)->count());
         $this->assertSame(0, ContentStrategy::where('strategy_id', $strategy->id)->count());
 
         // Schwester-Daten intakt
         $this->assertDatabaseHas('strategies', ['id' => $other->id]);
-        $this->assertSame(1, Persona::where('strategy_id', $other->id)->count());
+        // Die Survivor-Persona bleibt global erhalten und weiterhin mit "other" gemappt
+        $survivorPersona = Persona::where('strategy_id', $other->id)->first();
+        $this->assertNotNull($survivorPersona);
+        $this->assertTrue($survivorPersona->strategies()->where('strategy_id', $other->id)->exists());
         $this->assertSame(1, Source::where('strategy_id', $other->id)->count());
     }
 

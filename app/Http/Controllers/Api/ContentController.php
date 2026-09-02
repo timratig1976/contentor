@@ -61,21 +61,23 @@ class ContentController extends Controller
         $statementType = $this->rulesService->pickStatementType(null, $sourceType, $validated['input']);
 
         // Match persona — prefer explicit, then topic match, then first active
+        // (nur globale Personas, die dieser Strategie zugeordnet sind)
         $persona = null;
+        $mappedPersonas = $strategy->personas()->where('active', true)->get();
         if (!empty($validated['persona_id'])) {
-            $persona = Persona::find($validated['persona_id']);
+            $persona = $mappedPersonas->firstWhere('id', $validated['persona_id']) ?? Persona::find($validated['persona_id']);
         } else {
-            // Try to match by topic
-            $personas = Persona::where('strategy_id', $strategy->id)->where('active', true)->get();
-            foreach ($personas as $p) {
-                foreach ((array) $p->topics as $topic) {
+            // Try to match by topic (aus dem Strategie-Mapping)
+            foreach ($mappedPersonas as $p) {
+                $mapping = $p->strategyMapping($strategy->id);
+                foreach ((array) ($mapping['topic_clusters'] ?? []) as $topic) {
                     if (stripos($validated['input'], $topic) !== false) {
                         $persona = $p;
                         break 2;
                     }
                 }
             }
-            $persona ??= $personas->first();
+            $persona ??= $mappedPersonas->first();
         }
 
         $item = ContentItem::create([
@@ -106,6 +108,10 @@ class ContentController extends Controller
             'kpis' => 'nullable|string',
             'cta' => 'nullable|string',
             'strategy' => 'nullable|string|exists:strategies,key',
+            // NEU: Varianten-Generierung (A/B-fähig)
+            'variants_count' => 'sometimes|integer|min:1|max:5',
+            'variant_patterns' => 'sometimes|array',
+            'variant_patterns.*' => 'string|in:story,listicle,contrarian,question,data_drop',
         ]);
 
         $angle = Angle::with('strategy')->findOrFail($validated['angle_id']);
@@ -122,15 +128,21 @@ class ContentController extends Controller
         if (!empty($validated['persona_id'])) {
             $persona = Persona::find($validated['persona_id']);
             if ($persona) {
+                $mapping = $persona->strategyMapping($strategy->id);
                 $personaCtx = [
+                    'persona_id' => $persona->id,
                     'name' => $persona->name,
                     'role' => $persona->role,
                     'voice' => $persona->voice,
                     'tonality' => $persona->tonality,
                     'positioning' => $persona->positioning,
                     'core_statements' => $persona->core_statements,
-                    'topics' => $persona->topics,
+                    'topics' => $mapping['topic_clusters'] ?? [],
                     'content_attributes' => $persona->content_attributes,
+                    'perspective' => $persona->perspective,
+                    'emoji_usage' => $persona->emoji_usage,
+                    'max_sentence_length' => $persona->max_sentence_length,
+                    'forbidden_words' => $persona->forbidden_words,
                 ];
             }
         } elseif ($angle->contentItems->first()?->persona_id) {
@@ -145,18 +157,63 @@ class ContentController extends Controller
             }
         }
 
-        // Generate content via LLM mit Template + Brand Voice + Persona + Kanal-Regeln
-        $content = $this->generateContentWithLLM($angle, $validated, $strategy, $strategyCtx, $personaCtx);
+        // Varianten-Logik: 1 (Default) oder mehrere A/B-Varianten
+        $variantCount = $validated['variants_count'] ?? 1;
+        $patterns = $validated['variant_patterns']
+            ?? ['contrarian', 'listicle', 'story', 'question', 'data_drop'];
+        $groupId = $variantCount > 1 ? \Illuminate\Support\Str::uuid()->toString() : null;
 
-        // Enforce tone (with persona's tonality rules if available)
-        $content = $this->rulesService->enforceTone($content, $validated['format'], $strategy, $strategyCtx);
+        $items = [];
+        $violations = [];
+        $missingCta = [];
 
-        // Create content item
+        foreach (array_slice($patterns, 0, $variantCount) as $pattern) {
+            $params = $validated;
+            $params['pattern'] = $pattern;
+
+            $item = $this->produceSingleContent($angle, $params, $strategy, $strategyCtx, $personaCtx, $groupId, $pattern);
+            $items[] = $item;
+
+            // Tone-Verletzungen sammeln (pro Variante)
+            $v = $this->rulesService->checkToneViolations($item->content, $strategy, $strategyCtx);
+            if ($v) {
+                $violations[$item->id] = $v;
+            }
+
+            // Pflicht-CTA-Check (pro Variante)
+            if (!$this->rulesService->checkMandatoryCta($item->content, $strategy)) {
+                $missingCta[$item->id] = true;
+            }
+        }
+
+        // Backward-kompatible Response: bei 1 Variante zusätzlich content_item setzen
+        $response = [
+            'items'            => $items,
+            'variant_group_id' => $groupId,
+            'tone_violations'  => $violations,
+            'missing_cta'      => $missingCta,
+        ];
+        if (count($items) === 1) {
+            $response['content_item'] = $items[0]->load(['strategy', 'angle', 'media']);
+        }
+
+        return response()->json($response, 201);
+    }
+
+    /**
+     * Erzeugt genau ein ContentItem (inkl. LLM-Generierung, Tone-Enforcement
+     * und Media-Briefings). Wird von produzieren() pro Variante aufgerufen.
+     */
+    private function produceSingleContent(Angle $angle, array $params, Strategy $strategy, array $strategyCtx, ?array $personaCtx, ?string $groupId, ?string $pattern): ContentItem
+    {
+        $content = $this->generateContentWithLLM($angle, $params, $strategy, $strategyCtx, $personaCtx);
+        $content = $this->rulesService->enforceTone($content, $params['format'], $strategy, $strategyCtx);
+
         $item = ContentItem::create([
             'strategy_id' => $strategy->id,
             'angle_id' => $angle->id,
             'type' => 'post',
-            'format' => $validated['format'],
+            'format' => $params['format'],
             'title' => mb_substr($angle->angle, 0, 80),
             'content' => $content,
             'status' => 'in_produktion',
@@ -164,10 +221,12 @@ class ContentController extends Controller
             'pain_cluster' => $angle->pain_cluster,
             'statement_type' => $angle->statement_type,
             'owner' => $strategy->config['rules']['defaultOwner'] ?? $strategy->key,
+            'variant_group_id' => $groupId,
+            'variant_pattern' => $pattern,
         ]);
 
         // Auto-create media briefings
-        $briefings = $this->mediaService->buildBriefings($validated['format'], [
+        $briefings = $this->mediaService->buildBriefings($params['format'], [
             'angle' => $angle->angle,
             'icp' => $angle->icp,
         ], $strategyCtx);
@@ -183,7 +242,7 @@ class ContentController extends Controller
             ]);
         }
 
-        return response()->json($item->load(['strategy', 'angle', 'media']), 201);
+        return $item;
     }
 
     public function update(Request $request, ContentItem $contentItem): JsonResponse
@@ -202,6 +261,36 @@ class ContentController extends Controller
         $contentItem->update($validated);
 
         return response()->json($contentItem->load(['strategy', 'angle', 'media']));
+    }
+
+    /**
+     * Wählt eine A/B-Variante: setzt sie auf 'geplant' und verwirft alle
+     * anderen Items derselben variant_group_id.
+     */
+    public function selectVariant(Request $request, ContentItem $contentItem): JsonResponse
+    {
+        if (!$contentItem->variant_group_id) {
+            return response()->json(['message' => 'Item gehört zu keiner Varianten-Gruppe.'], 422);
+        }
+
+        $groupId = $contentItem->variant_group_id;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($contentItem, $groupId) {
+            // Alle anderen der Gruppe verworfen
+            ContentItem::where('variant_group_id', $groupId)
+                ->where('id', '!=', $contentItem->id)
+                ->update(['status' => 'verworfen']);
+
+            // Gewählte Variante geplant
+            $contentItem->update(['status' => 'geplant']);
+        });
+
+        $siblings = ContentItem::where('variant_group_id', $groupId)->get();
+
+        return response()->json([
+            'selected' => $contentItem->load(['strategy', 'angle', 'media']),
+            'group'    => $siblings,
+        ]);
     }
 
     public function overview(Request $request): JsonResponse
@@ -268,6 +357,7 @@ class ContentController extends Controller
 
         $prompt = $this->buildContentPrompt($angle, $params, $format, $template, $channelRules, $brandVoice, $personaCtx, $strategy);
 
+        $start = microtime(true);
         try {
             $response = \Illuminate\Support\Facades\Http::withHeaders([
                 'Authorization' => 'Bearer ' . $edenaiKey,
@@ -283,14 +373,51 @@ class ContentController extends Controller
             ]);
 
             $text = $response->json('choices.0.message.content');
+
+            // Kosten-Tracking: jeder LLM-Call wird geloggt (auch Fehlschläge)
+            \App\Models\AgentLog::create([
+                'agent'       => 'production',
+                'provider'    => 'edenai/openai',
+                'model'       => 'openai/gpt-4o',
+                'input'       => substr($prompt, 0, 2000),
+                'output'      => substr($text ?? '', 0, 2000),
+                'status'      => $text ? 'success' : 'error',
+                'tokens_used' => $response->json('usage.total_tokens'),
+                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
+            ]);
+
             if ($text && strlen(trim($text)) > 20) {
                 return trim($text);
             }
         } catch (\Throwable $e) {
+            \App\Models\AgentLog::create([
+                'agent'       => 'production',
+                'provider'    => 'edenai/openai',
+                'model'       => 'openai/gpt-4o',
+                'input'       => substr($prompt, 0, 2000),
+                'output'      => substr('Exception: ' . $e->getMessage(), 0, 2000),
+                'status'      => 'error',
+                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
+            ]);
             // Fallback unten
         }
 
         return $this->generateContent($angle, $params, $strategyCtx, $personaCtx);
+    }
+
+    /**
+     * Kurzer Stil-Hinweis pro A/B-Variante, damit die Varianten unterschiedlich ansetzen.
+     */
+    private function variantPatternHint(string $pattern): ?string
+    {
+        return match ($pattern) {
+            'story'      => 'Erzähle es als kurze Anekdoten-/Fallgeschichten-Erzählung (Storytelling).',
+            'listicle'   => 'Strukturiere es als kompakte Liste (3-5 konkrete Punkte).',
+            'contrarian' => 'Nimm einen konträren, provokativen Standpunkt, der den Mainstream widerspricht.',
+            'question'   => 'Führe mit einer zentralen, spannungsreich gestellten Frage ein.',
+            'data_drop'  => 'Beginne mit einer konkreten Zahl/Metrik als Hook und baue darauf auf.',
+            default      => null,
+        };
     }
 
     /**
@@ -301,32 +428,90 @@ class ContentController extends Controller
         $lines = [];
         $lines[] = "Schreibe einen {$format} für folgenden Content-Angle.";
         $lines[] = "";
-        $lines[] = "ANGLE (Kernaussage):\n{$angle->angle}";
+
+        // ═══ LAYER 1: CONTENT-KERN (Was soll gesagt werden?) ═══
+        $lines[] = "## CONTENT-KERN";
+        $lines[] = "ANGLE (Kernaussage): {$angle->angle}";
         if ($angle->icp) {
             $lines[] = "ICP: {$angle->icp}";
         }
         if ($angle->pain_cluster) {
             $lines[] = "Pain-Cluster: {$angle->pain_cluster}";
         }
-
+        foreach (['metric', 'mechanism', 'proofs', 'cta'] as $k) {
+            if (!empty($params[$k])) {
+                $lines[] = strtoupper($k) . " (vorgegeben): {$params[$k]}";
+            }
+        }
         if ($template) {
-            $lines[] = "";
             $lines[] = "PATTERN: {$template['label']} — {$template['beschreibung']}";
             $lines[] = "Struktur: " . implode(' → ', $template['struktur']);
             $lines[] = "Beispiel-Hook: \"{$template['beispiel_hook']}\"";
+        } elseif (!empty($params['variant_pattern'])) {
+            // A/B-Variante: Stil-Hinweis, damit jede Variante anders ansetzt
+            $hint = $this->variantPatternHint($params['variant_pattern']);
+            if ($hint) {
+                $lines[] = "VARIANTE ({$params['variant_pattern']}): {$hint}";
+            }
         }
 
+        // ═══ LAYER 2: STIL-LAYER (Wie soll es klingen?) ═══
+        $lines[] = "";
+        $lines[] = "## STIL-LAYER (Persona)";
         if ($personaCtx) {
-            $lines[] = "";
-            $lines[] = "ZIEL-PERSONA: {$personaCtx['name']} ({$personaCtx['role']})";
+            $lines[] = "Persona: {$personaCtx['name']} ({$personaCtx['role']})";
             if (!empty($personaCtx['voice'])) {
-                $lines[] = "Sprachstil der Persona: {$personaCtx['voice']}";
+                $lines[] = "Sprachstil: {$personaCtx['voice']}";
+            }
+            if (!empty($personaCtx['perspective'])) {
+                $lines[] = "Perspektive: {$personaCtx['perspective']}";
+            }
+            if (!empty($personaCtx['emoji_usage']) && $personaCtx['emoji_usage'] !== 'none') {
+                $lines[] = "Emoji-Nutzung: {$personaCtx['emoji_usage']}";
+            } elseif (!empty($personaCtx['emoji_usage']) && $personaCtx['emoji_usage'] === 'none') {
+                $lines[] = "Emoji-Nutzung: keine Emojis verwenden";
+            }
+            if (!empty($personaCtx['max_sentence_length'])) {
+                $lines[] = "Max. Satzlänge: {$personaCtx['max_sentence_length']} Wörter";
+            }
+            if (!empty($personaCtx['forbidden_words'])) {
+                $lines[] = "VERBOTENE WÖRTER (Persona): " . implode(', ', (array) $personaCtx['forbidden_words']);
             }
             if (!empty($personaCtx['core_statements'])) {
-                $lines[] = "Deren Überzeugungen: " . implode(' | ', array_slice((array) $personaCtx['core_statements'], 0, 3));
+                $lines[] = "Überzeugungen: " . implode(' | ', array_slice((array) $personaCtx['core_statements'], 0, 3));
+            }
+
+            // Few-Shot: kuratierte Referenz-Beispiele der Persona (gleiches Format)
+            if (!empty($personaCtx['persona_id'])) {
+                $examples = \App\Models\PersonaExample::where('persona_id', $personaCtx['persona_id'])
+                    ->where('format', $format)
+                    ->where('active', true)
+                    ->limit(2)
+                    ->get();
+
+                if ($examples->count() > 0) {
+                    $lines[] = "";
+                    $lines[] = "### Referenz-Beispiele (Few-Shot)";
+                    foreach ($examples as $i => $ex) {
+                        $lines[] = "Beispiel " . ($i + 1) . ":";
+                        $lines[] = "```";
+                        $lines[] = $ex->content;
+                        $lines[] = "```";
+                        if ($ex->why_good) {
+                            $lines[] = "Warum gut: {$ex->why_good}";
+                        }
+                    }
+                }
             }
         }
+        $voiceRules = $brandVoice['rules'] ?? [];
+        if ($voiceRules) {
+            $lines[] = "BRAND VOICE:\n- " . implode("\n- ", $voiceRules);
+        }
 
+        // ═══ LAYER 3: ZIEL-LAYER (Kanal, Format, CTA) ═══
+        $lines[] = "";
+        $lines[] = "## ZIEL-LAYER (Kanal/Format)";
         $rulesText = [];
         if (!empty($channelRules['word_count'])) {
             $rulesText[] = "Länge: {$channelRules['word_count']['min']}-{$channelRules['word_count']['max']} Wörter";
@@ -347,26 +532,11 @@ class ContentController extends Controller
             $rulesText[] = "Headline: max {$channelRules['headline_max_chars']} Zeichen";
         }
         if ($rulesText) {
-            $lines[] = "";
             $lines[] = "KANAL-REGELN:\n- " . implode("\n- ", $rulesText);
-        }
-
-        $voiceRules = $brandVoice['rules'] ?? [];
-        if ($voiceRules) {
-            $lines[] = "";
-            $lines[] = "BRAND VOICE:\n- " . implode("\n- ", $voiceRules);
-        }
-
-        foreach (['metric', 'mechanism', 'proofs', 'cta'] as $k) {
-            if (!empty($params[$k])) {
-                $lines[] = "";
-                $lines[] = strtoupper($k) . " (vorgegeben): {$params[$k]}";
-            }
         }
 
         $hashtags = $strategy->hashtags ?? [];
         if ($format === 'linkedin_post' && $hashtags) {
-            $lines[] = "";
             $lines[] = "Hashtags am Ende: " . implode(' ', array_slice($hashtags, 0, 5));
         }
 

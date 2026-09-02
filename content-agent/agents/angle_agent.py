@@ -31,7 +31,8 @@ Content-Angles zu bewerten, zu verfeinern und zu ranken.
    - **Timing (r_timing)**: Wie aktuell/relevant ist das Thema jetzt?
      1 = Evergreen, 2 = aktuell, 3 = hochaktuell/Trend
 
-3. **Ranking speichern**: Aktualisiere jeden Angle via update_angle() mit den Scores.
+3. **Ranking speichern**: Aktualisiere jeden Angle via update_angle() mit den Scores
+   UND der Begründung (score_reasoning).
 
 4. **Neue Angles vorschlagen**: Wenn du Lücken in der Strategie erkennst,
    schlage neue Angles via create_angle() vor.
@@ -44,6 +45,11 @@ Content-Angles zu bewerten, zu verfeinern und zu ranken.
 - Ein Angle mit Score <7 ist 🔴 schwach, sollte überarbeitet werden
 - Begründe jede Bewertung kurz
 - ICP-Matching: Prüfe, ob der Angle den Pain-Cluster des ICPs adressiert
+
+## Ausgabeformat für update_angle():
+Übergib bei jedem Update IMMER auch score_reasoning mit einer 1-2-Sätze-Begründung, z.B.:
+  score_reasoning="Trifft B2B-1 präzise (CRM-Datenqualität als Kernproblem). "
+                  "Schärfe hoch durch kontrarianen Take gegen Tool-Fokus."
 """
 
 mc = AGENT_MODELS["angle"]

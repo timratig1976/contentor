@@ -56,11 +56,10 @@ aus Top-Angles fertigen Content für verschiedene Kanäle zu produzieren.
   - Preview Text: Ergänzung zur Subject Line
   - Body: 3-4 Absätze, ein Call-to-Action
 
-## Brand Voice (aus der Strategie):
-- Keine Buzzwords, kein "revolutionär", kein "game-changer"
-- Keine Ausrufezeichen
-- Kein "wir", "uns", "ich" — stattdessen "du", "dein Team"
-- Ton: direkt, analytisch, leicht provokativ
+## Brand Voice:
+- Kommt dynamisch aus get_strategy() (brand_voice.rules + Persona-Stil:
+  Perspektive, Emoji-Nutzung, Max. Satzlänge, verbotene Wörter).
+- Halte dich strikt an diese Regeln — keine eigenen Stil-Annahmen.
 
 ## Wichtig:
 - Jeder Post braucht einen konkreten Mechanismus, nicht nur eine Behauptung

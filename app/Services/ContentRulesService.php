@@ -180,12 +180,26 @@ class ContentRulesService
             }
         }
 
-        foreach ($strategy->forbidden_patterns as $pattern) {
+        foreach ($unit->forbidden_patterns as $pattern) {
             if (preg_match('/' . $pattern . '/i', $raw)) {
                 $violations[] = $pattern;
             }
         }
 
         return $violations;
+    }
+
+    /**
+     * Prüft ob ein verpflichtender CTA vorhanden ist (aus Strategy.config.rules.mandatoryCta).
+     * Rückgabe true, wenn kein Pflicht-CTA definiert oder der CTA enthalten ist.
+     */
+    public function checkMandatoryCta(string $text, Strategy $unit): bool
+    {
+        $mandatoryCta = $unit->config['rules']['mandatoryCta'] ?? null;
+        if (!$mandatoryCta) {
+            return true; // kein Pflicht-CTA definiert
+        }
+
+        return str_contains(mb_strtolower($text), mb_strtolower($mandatoryCta));
     }
 }

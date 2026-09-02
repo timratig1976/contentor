@@ -192,6 +192,7 @@ def update_angle(
     r_viscale_fit: int | None = None,
     r_schaerfe: int | None = None,
     r_timing: int | None = None,
+    score_reasoning: str | None = None,
 ) -> dict:
     """Aktualisiere einen Angle (inkl. Ranking-Kriterien).
 
@@ -207,13 +208,15 @@ def update_angle(
     :param r_viscale_fit: Ranking: Viscale-Fit 1-3
     :param r_schaerfe: Ranking: Schärfe 1-3
     :param r_timing: Ranking: Timing 1-3
+    :param score_reasoning: Kurze Begründung der Bewertung (1-2 Sätze)
     """
     payload = {}
     for k, v in [("angle", angle), ("icp", icp), ("pain_cluster", pain_cluster),
                   ("statement_type", statement_type), ("funnel", funnel),
                   ("viscale_phase", viscale_phase), ("status", status),
                   ("r_zielgruppe", r_zielgruppe), ("r_viscale_fit", r_viscale_fit),
-                  ("r_schaerfe", r_schaerfe), ("r_timing", r_timing)]:
+                  ("r_schaerfe", r_schaerfe), ("r_timing", r_timing),
+                  ("score_reasoning", score_reasoning)]:
         if v is not None: payload[k] = v
     r = httpx.patch(f"{CONTENT_API_URL}/angles/{angle_id}", json=payload)
     r.raise_for_status()
@@ -270,6 +273,8 @@ def produce_content(
     proofs: str | None = None,
     kpis: str | None = None,
     cta: str | None = None,
+    variants_count: int | None = None,
+    variant_patterns: list[str] | None = None,
     strategy: str = CONTENT_STRATEGY,
 ) -> dict:
     """Produziere Content aus einem Angle. Das Backend generiert den Text
@@ -284,12 +289,15 @@ def produce_content(
     :param proofs: Beweise/Belege (optional)
     :param kpis: KPIs (optional)
     :param cta: Call-to-Action (optional)
+    :param variants_count: Anzahl A/B-Varianten (1-5, default 1)
+    :param variant_patterns: Welche Varianten (story, listicle, contrarian, question, data_drop)
     :param strategy: Unit-Key
     """
     payload = {"angle_id": angle_id, "format": format, "strategy": strategy}
     for k, v in [("pattern", pattern), ("persona_id", persona_id),
                   ("metric", metric), ("mechanism", mechanism),
-                  ("proofs", proofs), ("kpis", kpis), ("cta", cta)]:
+                  ("proofs", proofs), ("kpis", kpis), ("cta", cta),
+                  ("variants_count", variants_count), ("variant_patterns", variant_patterns)]:
         if v is not None: payload[k] = v
     r = httpx.post(f"{CONTENT_API_URL}/content/produzieren", json=payload)
     r.raise_for_status()

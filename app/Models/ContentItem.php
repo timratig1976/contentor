@@ -16,6 +16,7 @@ class ContentItem extends Model
         'id', 'strategy_id', 'angle_id', 'type', 'format', 'title',
         'content', 'status', 'owner', 'live_date', 'persona_id',
         'icp', 'pain_cluster', 'statement_type',
+        'variant_group_id', 'variant_pattern',
     ];
 
     protected $casts = [

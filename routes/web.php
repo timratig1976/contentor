@@ -13,6 +13,7 @@ use App\Http\Controllers\QuellenPageController;
 use App\Http\Controllers\QuickInputPageController;
 use App\Http\Controllers\RedaktionsplanPageController;
 use App\Http\Controllers\StrategyPageController;
+use App\Http\Controllers\TemplatesPageController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
@@ -24,6 +25,7 @@ Route::get('/angles/{angle}', [AnglePageController::class, 'show'])->name('angle
 Route::get('/quick-input', [QuickInputPageController::class, 'index'])->name('quick-input');
 Route::get('/redaktionsplan', [RedaktionsplanPageController::class, 'index'])->name('redaktionsplan');
 Route::get('/strategie', [StrategyPageController::class, 'index'])->name('strategie');
+Route::get('/templates', [TemplatesPageController::class, 'index'])->name('templates');
 Route::get('/medien', [MediaPageController::class, 'index'])->name('medien');
 Route::get('/newsletter', [NewsletterPageController::class, 'index'])->name('newsletter');
 Route::get('/agents', [AgentsPageController::class, 'index'])->name('agents');

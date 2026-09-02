@@ -9,9 +9,11 @@ use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\MonitoringController;
 use App\Http\Controllers\Api\NewsletterController;
 use App\Http\Controllers\Api\PersonaController;
+use App\Http\Controllers\Api\PersonaExampleController;
 use App\Http\Controllers\Api\QuickInputController;
 use App\Http\Controllers\Api\RedaktionsplanController;
 use App\Http\Controllers\Api\StrategyCrudController;
+use App\Http\Controllers\Api\StrategyPersonaController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SourceController;
 use App\Http\Controllers\Api\StrategyController;
@@ -34,6 +36,7 @@ Route::post('/content/idee', [ContentController::class, 'storeIdee']);
 Route::post('/content/produzieren', [ContentController::class, 'produzieren']);
 Route::get('/content', [ContentController::class, 'index']);
 Route::patch('/content/{contentItem}', [ContentController::class, 'update']);
+Route::post('/content/{contentItem}/select-variant', [ContentController::class, 'selectVariant']);
 Route::get('/content/overview', [ContentController::class, 'overview']);
 Route::get('/content/{contentItem}/preview', [ContentController::class, 'preview']);
 
@@ -64,6 +67,12 @@ Route::post('/personas', [PersonaController::class, 'store']);
 Route::patch('/personas/{persona}', [PersonaController::class, 'update']);
 Route::delete('/personas/{persona}', [PersonaController::class, 'destroy']);
 
+// Persona Few-Shot-Beispiele (Referenz-Posts)
+Route::get('/personas/{persona}/examples', [PersonaExampleController::class, 'index']);
+Route::post('/personas/{persona}/examples', [PersonaExampleController::class, 'store']);
+Route::patch('/personas/{persona}/examples/{example}', [PersonaExampleController::class, 'update']);
+Route::delete('/personas/{persona}/examples/{example}', [PersonaExampleController::class, 'destroy']);
+
 // Settings (API Keys, Config)
 Route::get('/settings', [SettingsController::class, 'index']);
 Route::post('/settings', [SettingsController::class, 'store']);
@@ -91,6 +100,11 @@ Route::get('/strategies', [StrategyCrudController::class, 'index']);
 Route::post('/strategies', [StrategyCrudController::class, 'store']);
 Route::patch('/strategies/{strategy}', [StrategyCrudController::class, 'update']);
 Route::delete('/strategies/{strategy}', [StrategyCrudController::class, 'destroy']);
+
+// Strategie ↔ Persona Mapping (globale Personas)
+Route::get('/strategies/{strategy}/personas', [StrategyPersonaController::class, 'index']);
+Route::post('/strategies/{strategy}/personas', [StrategyPersonaController::class, 'attach']);
+Route::delete('/strategies/{strategy}/personas/{persona}', [StrategyPersonaController::class, 'detach']);
 
 // Monitoring (Quellen-Crawls, Event-Feed, Test-Suche)
 Route::get('/monitoring', [MonitoringController::class, 'index']);

@@ -22,8 +22,6 @@ class PersonaApiTest extends TestCase
             'positioning' => 'Thought Leader',
             'core_statements' => ['CRM ist kein Tool-Problem'],
             'tonality' => ['style' => 'direkt', 'do' => ['Mechanismus'], 'dont' => ['Buzzwords']],
-            'topics' => ['CRM', 'Sales'],
-            'angles' => [['text' => 'Test Angle', 'icp' => 'B2B-1', 'funnel' => 'ToFu', 'score' => 10]],
             'content_attributes' => ['maxLength' => 2000, 'tone' => 'direkt', 'formats' => ['linkedin_post'], 'keywords' => ['CRM']],
             'cadence' => 'weekly',
             'active' => true,
@@ -32,7 +30,8 @@ class PersonaApiTest extends TestCase
         $response->assertStatus(201);
         $response->assertJsonPath('name', 'Max Mustermann');
         $response->assertJsonPath('tonality.style', 'direkt');
-        $response->assertJsonCount(1, 'angles');
+        // Persona ist global + per strategy-Feld direkt gemappt
+        $response->assertJsonCount(1, 'strategies');
     }
 
     public function test_list_personas(): void
@@ -53,11 +52,12 @@ class PersonaApiTest extends TestCase
 
         $response = $this->patchJson("/api/personas/{$persona->id}", [
             'name' => 'Updated',
-            'topics' => ['New Topic'],
+            'voice' => 'Direkt und analytisch',
         ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('name', 'Updated');
+        $response->assertJsonPath('voice', 'Direkt und analytisch');
     }
 
     public function test_delete_persona(): void

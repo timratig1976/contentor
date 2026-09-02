@@ -88,15 +88,16 @@ class AgentContextService
     private function personaSection(Strategy $strategy, ?int $personaId): string
     {
         if ($personaId) {
-            $persona = Persona::where('strategy_id', $strategy->id)->find($personaId);
-            if (!$persona) {
+            $persona = Persona::find($personaId);
+            if (!$persona || !$persona->strategies->contains('id', $strategy->id)) {
                 return "### Ziel-Persona\nPersona #{$personaId} nicht in Strategie '{$strategy->key}' gefunden.";
             }
             return "### Ziel-Persona (ALLE Inhalte zielen auf diese Persona)\n"
-                . $this->describePersona($persona);
+                . $this->describePersona($persona, $strategy->id);
         }
 
-        $personas = Persona::where('strategy_id', $strategy->id)->where('active', true)->get();
+        // Globale Personas, die dieser Strategie zugeordnet sind
+        $personas = $strategy->personas()->where('active', true)->get();
         if ($personas->isEmpty()) {
             return "### Personas\nKeine aktiven Personas hinterlegt. "
                 . "Recherchiere breit für die oben genannten ICPs und ordne Angles selbst dem passendsten ICP zu.";
@@ -104,22 +105,24 @@ class AgentContextService
 
         $lines = ['### Verfügbare Personas (wähle die passendste für das Thema)'];
         foreach ($personas as $p) {
-            $lines[] = $this->describePersona($p);
+            $lines[] = $this->describePersona($p, $strategy->id);
         }
         return implode("\n\n", $lines);
     }
 
     /**
      * Kompakte Persona-Beschreibung für den Prompt.
+     * Themen-Cluster kommen aus dem Strategie-Mapping (nicht global).
      */
-    private function describePersona(Persona $p): string
+    private function describePersona(Persona $p, ?int $strategyId = null): string
     {
         $lines = ["#### Persona: {$p->name} (ID {$p->id})"];
         if ($p->role) {
             $lines[] = "- Rolle: {$p->role}";
         }
-        if (!empty($p->topics)) {
-            $lines[] = '- Themen: ' . implode(', ', (array) $p->topics);
+        $mapping = $p->strategyMapping($strategyId);
+        if ($mapping && !empty($mapping['topic_clusters'])) {
+            $lines[] = '- Themen (diese Strategie): ' . implode(', ', (array) $mapping['topic_clusters']);
         }
         if (!empty($p->core_statements)) {
             $lines[] = '- Core Statements: ' . implode(' | ', array_slice((array) $p->core_statements, 0, 5));
@@ -133,6 +136,18 @@ class AgentContextService
         }
         if (!empty($p->content_attributes)) {
             $lines[] = '- Content-Attribute: ' . $this->flatten($p->content_attributes);
+        }
+        if (!empty($p->perspective)) {
+            $lines[] = "- Perspektive: {$p->perspective}";
+        }
+        if (!empty($p->emoji_usage)) {
+            $lines[] = "- Emoji-Nutzung: {$p->emoji_usage}";
+        }
+        if (!empty($p->max_sentence_length)) {
+            $lines[] = "- Max. Satzlänge: {$p->max_sentence_length} Wörter";
+        }
+        if (!empty($p->forbidden_words)) {
+            $lines[] = "- Verbotene Wörter: " . implode(', ', (array) $p->forbidden_words);
         }
         return implode("\n", $lines);
     }

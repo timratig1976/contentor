@@ -15,6 +15,12 @@ const form = reactive({
     batch_key: '', create_angles: true, num_angles: 5,
 });
 
+const urlForm = reactive({
+    url: '', title: '',
+    strategy: props.strategies?.[0]?.key || 'viscale',
+    batch_key: '',
+});
+
 const pdfForm = reactive({ file: null, title: '', strategy: props.strategies?.[0]?.key || 'viscale', batch_key: '' });
 
 async function submitText() {
@@ -24,6 +30,28 @@ async function submitText() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
             body: JSON.stringify({ ...form }),
+        });
+        result.value = await res.json();
+    } catch (e) { alert('Fehler: ' + e.message); }
+    finally { loading.value = false; }
+}
+
+async function submitUrl() {
+    if (!urlForm.url.trim()) return;
+    loading.value = true; result.value = null;
+    try {
+        const res = await fetch('/api/quick-input', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify({
+                content: urlForm.url,
+                title: urlForm.title || urlForm.url,
+                strategy: urlForm.strategy,
+                batch_key: urlForm.batch_key,
+                type: 'url',
+                create_angles: true,
+                num_angles: 5,
+            }),
         });
         result.value = await res.json();
     } catch (e) { alert('Fehler: ' + e.message); }
@@ -107,18 +135,51 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
 
       <!-- URL -->
       <div v-if="mode==='url'" class="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
-        <p class="text-sm text-gray-600">Gib eine URL ein — der Agent recherchiert den Inhalt automatisch.</p>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">URL</label><input v-model="form.content" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="https://..." /></div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><label class="block text-sm text-gray-900 mb-1 font-medium">Titel</label><input v-model="form.title" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" /></div>
-          <div><label class="block text-sm text-gray-900 mb-1 font-medium">Strategie</label><select v-model="form.strategy" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors"><option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option></select></div>
+        <div class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <span class="text-lg shrink-0">🌐</span>
+          <div>
+            <p class="text-sm font-medium text-blue-800">URL scrapen</p>
+            <p class="text-xs text-blue-600 mt-0.5">Der Seiteninhalt wird automatisch geladen und analysiert. Benötigt einen EdenAI-Key in den Einstellungen.</p>
+          </div>
         </div>
-        <button @click="submitText" :disabled="loading || form.content.length < 5" class="neu-btn-primary px-4 py-2 text-sm">{{ loading ? 'Verarbeite...' : 'Verarbeiten' }}</button>
+        <div>
+          <label class="block text-sm text-gray-900 mb-1 font-medium">URL *</label>
+          <input v-model="urlForm.url" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
+            placeholder="https://example.com/artikel" @keydown.enter="submitUrl" />
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Titel (optional)</label>
+            <input v-model="urlForm.title" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20" placeholder="Wird aus der Seite gelesen wenn leer" />
+          </div>
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Strategie</label>
+            <select v-model="urlForm.strategy" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20">
+              <option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-900 mb-1 font-medium">Batch-Key (optional)</label>
+          <input v-model="urlForm.batch_key" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. wettbewerber-2026" />
+        </div>
+        <button @click="submitUrl" :disabled="loading || urlForm.url.length < 4" class="neu-btn-primary px-4 py-2 text-sm disabled:opacity-50">
+          {{ loading ? '🌐 Scraping läuft…' : '🌐 URL laden & analysieren' }}
+        </button>
       </div>
 
       <!-- Result -->
       <div v-if="result" class="bg-white border border-gray-200 rounded-xl p-6 mt-6">
-        <h3 class="text-gray-900 font-semibold mb-4">Ergebnis</h3>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-gray-900 font-semibold">Ergebnis</h3>
+          <div class="flex items-center gap-2">
+            <span v-if="result.scraped" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full">🌐 URL gescraped</span>
+            <span v-if="result.content_length" class="text-xs text-gray-400">{{ result.content_length.toLocaleString() }} Zeichen verarbeitet</span>
+          </div>
+        </div>
+        <div v-if="result.error" class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <p class="text-sm text-red-700">{{ result.error }}</p>
+        </div>
         <div v-if="result.source" class="mb-4">
           <p class="text-sm text-gray-600 mb-2">Quelle erstellt:</p>
           <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -127,13 +188,20 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
           </div>
         </div>
         <div v-if="result.angles?.length">
-          <p class="text-sm text-gray-600 mb-2">Extrahierte Angles:</p>
+          <p class="text-sm text-gray-600 mb-2">{{ result.angles.length }} Angle{{ result.angles.length !== 1 ? 's' : '' }} extrahiert:</p>
           <div class="space-y-2">
             <div v-for="angle in result.angles" :key="angle.id" class="bg-gray-50 border border-gray-200 rounded-lg p-3">
               <p class="text-sm text-gray-900">{{ angle.angle }}</p>
               <div class="flex gap-2 mt-1"><span v-if="angle.icp" class="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">{{ angle.icp }}</span><span v-if="angle.statement_type" class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">{{ angle.statement_type }}</span></div>
             </div>
           </div>
+        </div>
+        <div v-else-if="result.source && !result.error" class="text-sm text-gray-500 italic mt-2">
+          Keine Angles extrahiert — zu wenig Textinhalt. Füge mehr Text ein oder lade den Inhalt manuell.
+        </div>
+        <div class="mt-4 pt-3 border-t border-gray-100 flex gap-3">
+          <a :href="`/angles?batch=${result.source?.batch_key}`" class="text-sm text-green-600 hover:text-green-700 font-medium">Angles ansehen →</a>
+          <a :href="`/quellen`" class="text-sm text-gray-500 hover:text-gray-700">Zur Quellenübersicht</a>
         </div>
       </div>
     </div>

@@ -29,7 +29,8 @@ const navSections = [
         title: 'Konfiguration',
         items: [
             { name: 'Strategie', href: '/strategie', icon: '🧠' },
-            { name: 'Personas', href: '/personas', icon: '👤' },
+            { name: 'Templates', href: '/templates', icon: '📝' },
+            { name: 'Creator', href: '/personas', icon: '👤' },
         ],
     },
 ];

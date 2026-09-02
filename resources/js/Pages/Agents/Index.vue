@@ -8,6 +8,14 @@ const props = defineProps({ settings: Object, strategies: Object, agentPrompts: 
 const activeAgent = ref(null);
 const detailTab = ref('prompt');
 
+// Modell-Label ohne doppelten Provider-Präfix anzeigen.
+// EdenAI liefert Modell-IDs teils mit führendem "provider/" (z. B. "anthropic/claude-sonnet-4-6"),
+// teils ohne — deshalb hier den Präfix einmalig normalisieren.
+function modelLabel(provider, model) {
+    const m = (model || '').replace(new RegExp('^' + (provider || '') + '/'), '');
+    return m ? `${provider}/${m}` : provider;
+}
+
 const llmKeys = computed(() => props.settings?.llm_keys || {});
 const hasEdenAI = computed(() => !!llmKeys.value?.edenai_key);
 const hasSerperDev = computed(() => !!llmKeys.value?.serperdev_key);
@@ -267,7 +275,7 @@ function toggleLog(id) {
                         <h3 class="text-sm font-medium text-gray-800">{{ info.name }}</h3>
                         <p class="text-xs text-gray-400 mt-0.5">{{ info.desc }}</p>
                         <div class="mt-3 flex items-center justify-between">
-                            <span class="text-xs text-gray-400">{{ models[key].provider }}/{{ models[key].model }}</span>
+                            <span class="text-xs text-gray-400">{{ modelLabel(models[key].provider, models[key].model) }}</span>
                             <span class="text-xs text-gray-400">{{ logCount(key) }} logs</span>
                         </div>
                     </div>
@@ -389,7 +397,7 @@ function toggleLog(id) {
                             <p class="text-xs text-gray-400">{{ agents[activeAgent].desc }}</p>
                         </div>
                     </div>
-                    <span class="text-xs text-gray-400  px-2 py-1 rounded-full">{{ models[activeAgent].provider }}/{{ models[activeAgent].model }}</span>
+                    <span class="text-xs text-gray-400  px-2 py-1 rounded-full">{{ modelLabel(models[activeAgent].provider, models[activeAgent].model) }}</span>
                 </div>
 
                 <div class="flex gap-1 mb-6">
@@ -432,7 +440,7 @@ function toggleLog(id) {
                         </div>
                     </div>
                     <div class="mt-4 p-3 neu-card-sm">
-                        <p class="text-xs text-gray-400">Aktuell: <span class="text-gray-800 font-medium">{{ models[activeAgent].provider }}/{{ models[activeAgent].model }}</span></p>
+                        <p class="text-xs text-gray-400">Aktuell: <span class="text-gray-800 font-medium">{{ modelLabel(models[activeAgent].provider, models[activeAgent].model) }}</span></p>
                     </div>
                     <span v-if="modelsSaved" class="text-xs text-green-600 ml-3">✓ Gespeichert</span>
                 </div>
@@ -466,7 +474,7 @@ function toggleLog(id) {
                         <h4 class="text-sm font-medium text-gray-800 mb-3">Ergebnis</h4>
                         <div class="space-y-3 text-sm">
                             <div class="grid grid-cols-2 gap-4 text-xs">
-                                <div><span class="text-gray-400">Modell:</span> <span class="text-gray-800">{{ testResult.provider }}/{{ testResult.model }}</span></div>
+                                <div><span class="text-gray-400">Modell:</span> <span class="text-gray-800">{{ modelLabel(testResult.provider, testResult.model) }}</span></div>
                                 <div><span class="text-gray-400">Agent:</span> <span class="text-gray-800">{{ agents[testResult.agent]?.name }}</span></div>
                             </div>
                             <div><p class="text-xs text-gray-400 mb-1">Eingabe:</p><div class="neu-card-sm p-3 text-gray-400">{{ testResult.input }}</div></div>
@@ -498,7 +506,7 @@ function toggleLog(id) {
                                     <p class="text-xs text-gray-400 mb-0.5">Output</p>
                                     <p class="text-xs text-gray-800 whitespace-pre-wrap max-h-64 overflow-y-auto">{{ log.output }}</p>
                                 </div>
-                                <p class="text-xs text-gray-400">{{ log.provider }}/{{ log.model }} · {{ log.status }}</p>
+                                <p class="text-xs text-gray-400">{{ modelLabel(log.provider, log.model) }} · {{ log.status }}</p>
                             </div>
                         </div>
                         <p v-if="filteredLogs(activeAgent).length === 0" class="text-xs text-gray-400 italic py-2">Noch keine Logs.</p>
