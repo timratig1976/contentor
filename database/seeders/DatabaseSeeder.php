@@ -10,6 +10,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             StrategySeeder::class,
+            ContentTransferSeeder::class,
             AgentPromptsSeeder::class,
         ]);
     }
