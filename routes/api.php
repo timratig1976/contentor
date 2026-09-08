@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\StrategyPersonaController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SourceController;
 use App\Http\Controllers\Api\StrategyController;
+use App\Http\Controllers\Api\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
 // Quellen
@@ -24,6 +25,7 @@ Route::post('/sources', [SourceController::class, 'store']);
 Route::get('/sources', [SourceController::class, 'index']);
 Route::patch('/sources/{source}', [SourceController::class, 'update']);
 Route::get('/sources/{source}/angles', [SourceController::class, 'angles']);
+Route::post('/sources/{source}/crawl', [SourceController::class, 'crawl']);
 
 // Angles
 Route::post('/angles', [AngleController::class, 'store']);
@@ -36,9 +38,11 @@ Route::get('/angles/batch/{batchKey}', [AngleController::class, 'batchRanking'])
 // Content
 Route::post('/content/idee', [ContentController::class, 'storeIdee']);
 Route::post('/content/produzieren', [ContentController::class, 'produzieren']);
+Route::post('/content/recommend-statement', [ContentController::class, 'recommendStatement']);
 Route::get('/content', [ContentController::class, 'index']);
 Route::patch('/content/{contentItem}', [ContentController::class, 'update']);
 Route::post('/content/{contentItem}/select-variant', [ContentController::class, 'selectVariant']);
+Route::post('/content/{contentItem}/assistant-edit', [ContentController::class, 'assistantEdit']);
 Route::get('/content/overview', [ContentController::class, 'overview']);
 Route::get('/content/{contentItem}/preview', [ContentController::class, 'preview']);
 
@@ -113,3 +117,8 @@ Route::get('/monitoring', [MonitoringController::class, 'index']);
 Route::post('/monitoring/run', [MonitoringController::class, 'run']);
 Route::post('/monitoring/sources/{source}/check', [MonitoringController::class, 'checkSource']);
 Route::post('/monitoring/test-search', [MonitoringController::class, 'testSearch']);
+
+// Workflow-Runner (Python-Multi-Agent-Debug) + Verlauf
+Route::post('/workflow/run', [WorkflowController::class, 'run']);
+Route::get('/workflow/runs', [WorkflowController::class, 'index']);
+Route::get('/workflow/runs/{run}', [WorkflowController::class, 'show']);

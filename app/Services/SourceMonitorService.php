@@ -65,6 +65,10 @@ class SourceMonitorService
      */
     public function checkSource(Source $source): array
     {
+        if (empty($source->url)) {
+            return ['source' => $source->id, 'url' => null, 'status' => 'error', 'error' => 'Keine URL hinterlegt.'];
+        }
+
         $result = $this->web->scrape($source->url);
 
         if (! $result['success']) {

@@ -1,289 +1,350 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-const props = defineProps({
-    angle: Object,
-    templates: Array,
-});
+const props = defineProps({ angle: Object, templates: Array });
 
+const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+// ─── Status ───
+const statusLabels = { neu: 'Neu', bewertet: 'Bewertet', approved: 'approved', verworfen: 'Verworfen' };
+const statusClasses = { neu: 'bg-gray-100 text-gray-800', bewertet: 'bg-blue-50 text-blue-700', approved: 'bg-green-50 text-green-700', verworfen: 'bg-red-50 text-red-700' };
+const status = ref(props.angle.status);
+const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
+async function setStatus() {
+    if (status.value === props.angle.status) return;
+    await router.patch(`/api/angles/${props.angle.id}`, { status: status.value }, { preserveState: true });
+    props.angle.status = status.value;
+}
+
+// ─── Scoring (kompakt, Hover-Detail) ───
 const rankings = ref({
     r_zielgruppe: props.angle.r_zielgruppe || 0,
     r_viscale_fit: props.angle.r_viscale_fit || 0,
     r_schaerfe: props.angle.r_schaerfe || 0,
     r_timing: props.angle.r_timing || 0,
 });
-
 const saving = ref(false);
-const generating = ref(false);
-const generateResult = ref(null);
-const selectedTemplates = ref([]);
-
-const statusLabels = {
-    neu: 'Neu',
-    bewertet: 'Bewertet',
-    approved: 'approved',
-    verworfen: 'Verworfen',
+const showScoreDetail = ref(false);
+const criteriaLabels = { r_zielgruppe: 'Zielgruppe', r_viscale_fit: 'Fit', r_schaerfe: 'Schärfe', r_timing: 'Timing' };
+const criteriaHint = {
+    r_zielgruppe: 'Wie präzise trifft der Angle den ICP? (1=generisch, 2=relevant, 3=punktgenau)',
+    r_viscale_fit: 'Wie gut passt der Angle zur Positionierung? (1=schwach, 2=passend, 3=perfekt)',
+    r_schaerfe: 'Wie provokativ/meinungsstark? (1=neutral, 2=pointiert, 3=scharf)',
+    r_timing: 'Wie aktuell/relevant? (1=evergreen, 2=aktuell, 3=trend)',
 };
-
-const statusClasses = {
-    neu: 'bg-gray-100 text-gray-600',
-    bewertet: 'bg-blue-50 text-blue-600',
-    approved: 'bg-green-50 text-green-700',
-    verworfen: 'bg-red-50 text-red-700',
-};
-
-const status = ref(props.angle.status);
-const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
-
-async function setStatus() {
-    if (status.value === props.angle.status) return;
-    await router.patch(`/api/angles/${props.angle.id}`, { status: status.value }, {
-        preserveState: true,
-        onSuccess: () => { props.angle.status = status.value; },
-    });
-}
-
 function updateRanking() {
     saving.value = true;
-    router.patch(`/api/angles/${props.angle.id}`, rankings.value, {
-        preserveState: true,
-        onFinish: () => saving.value = false,
-    });
+    router.patch(`/api/angles/${props.angle.id}`, rankings.value, { preserveState: true, onFinish: () => saving.value = false });
 }
 
-const criteriaLabels = {
-    r_zielgruppe: 'Zielgruppe',
-    r_viscale_fit: 'viscale Fit',
-    r_schaerfe: 'Schärfe',
-    r_timing: 'Timing',
+// ─── Produzieren-Controls (kompakt) ───
+const generating = ref(false);
+const selectedTemplates = ref([]);
+const activeFormat = ref('linkedin_post');
+const statementType = ref(props.angle.statement_type || 'Direkt');
+const statementReason = ref('');
+const statementHint = ref('');
+const statementOptions = ['Direkt', 'Drastisch', 'Bedrohlich', 'Gain', 'Mechanismus', 'Vision', 'Sarkastisch'];
+
+const formatLabels = {
+    linkedin_post: 'LinkedIn Post', ad_copy: 'Ad Copy',
+    newsletter_acquisition: 'Newsletter', newsletter_bk: 'Newsletter BK',
+    landing_page_headlines: 'Landing Page', blog_post: 'Blog Post',
+};
+const formatDesc = {
+    linkedin_post: 'Hook → Mechanismus → Beweis → Soft-CTA.',
+    ad_copy: 'Primary Text (max 125 Z.) → Headline (max 40 Z.) → CTA.',
+    newsletter_acquisition: 'Betreff → Preview → Body → CTA.',
+    newsletter_bk: 'Betreff → Einleitung → Hauptteil → Next Step.',
+    landing_page_headlines: 'Hero Headline → Sub → 3 Bullets → CTA.',
+    blog_post: 'Einleitung, Absätze, Fazit.',
 };
 
+const availableFormats = computed(() => {
+    const fmts = new Set((props.templates || []).map(t => t.format));
+    if (!fmts.has('linkedin_post')) fmts.add('linkedin_post');
+    if (!fmts.has('blog_post')) fmts.add('blog_post');
+    return [...fmts];
+});
+const filteredTemplates = computed(() => (props.templates || []).filter(t => t.format === activeFormat.value));
+
+function selectFormat(fmt) { activeFormat.value = fmt; selectedTemplates.value = []; recommendStatement(); }
 function toggleTemplate(tpl) {
     const idx = selectedTemplates.value.findIndex(t => t.name === tpl.name);
     if (idx >= 0) selectedTemplates.value.splice(idx, 1);
     else selectedTemplates.value.push(tpl);
 }
-
-function isSelected(name) {
-    return selectedTemplates.value.some(t => t.name === name);
+function isSelected(name) { return selectedTemplates.value.some(t => t.name === name); }
+function patternFor(tpl) {
+    const n = (tpl.name || '').toLowerCase();
+    return n.includes('contrarian') ? 'contrarian' : n.includes('data') ? 'data_drop' : n.includes('mistake') ? 'mistake_post'
+        : n.includes('story') ? 'story' : n.includes('list') ? 'listicle' : n.includes('question') ? 'question'
+        : n.includes('framework') ? 'framework' : 'contrarian';
 }
+
+async function recommendStatement() {
+    try {
+        const res = await fetch('/api/content/recommend-statement', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body: JSON.stringify({ format: activeFormat.value, funnel: props.angle.funnel || null, icp: props.angle.icp || null, angle: props.angle.angle || '' }),
+        });
+        const data = await res.json();
+        if (data.statement_type) { statementType.value = data.statement_type; statementReason.value = data.reason || ''; statementHint.value = data.hint || ''; }
+    } catch {}
+}
+
+// ─── Editor-State: die erzeugten Posts ───
+const posts = ref([]);              // aktive (nicht verworfene) Posts im Editor
+const activePostId = ref(null);
+
+const activePost = computed(() => posts.value.find(p => p.id === activePostId.value));
+
+function selectPost(p) { activePostId.value = p.id; }
 
 async function generateVariants() {
     if (!selectedTemplates.value.length) return;
     generating.value = true;
-    generateResult.value = null;
-
-    const patterns = selectedTemplates.value.map(t =>
-        t.name.toLowerCase().includes('contrarian') ? 'contrarian' :
-        t.name.toLowerCase().includes('data') ? 'data_drop' :
-        t.name.toLowerCase().includes('mistake') ? 'mistake_post' :
-        t.name.toLowerCase().includes('story') ? 'story' :
-        t.name.toLowerCase().includes('listicle') ? 'listicle' :
-        t.name.toLowerCase().includes('question') ? 'question' :
-        'contrarian'
-    );
-
-    // Pro Template ein Format — wir nutzen das Format des ersten ausgewählten
-    const format = selectedTemplates.value[0]?.format || 'linkedin_post';
-
+    const patterns = selectedTemplates.value.map(patternFor);
     try {
         const res = await fetch('/api/content/produzieren', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
             body: JSON.stringify({
-                angle_id: props.angle.id,
-                strategy: props.angle.strategy?.key,
-                format: format,
-                variants_count: selectedTemplates.value.length,
-                variant_patterns: patterns,
+                angle_id: props.angle.id, strategy: props.angle.strategy?.key, format: activeFormat.value,
+                statement_type: statementType.value,
+                variants_count: selectedTemplates.value.length, variant_patterns: patterns,
             }),
         });
-        generateResult.value = await res.json();
-    } catch (e) {
-        generateResult.value = { error: e.message };
-    }
+        const data = await res.json();
+        if (data.items) {
+            posts.value = data.items;
+            activePostId.value = data.items[0]?.id || null;
+        }
+    } catch (e) { alert('Fehler: ' + e.message); }
     generating.value = false;
 }
+
+// ─── Editor-Aktionen ───
+const editInstruction = ref('');
+const editLoading = ref(false);
+
+async function submitEdit() {
+    if (!editInstruction.value.trim() || !activePost.value) return;
+    editLoading.value = true;
+    try {
+        const res = await fetch(`/api/content/${activePost.value.id}/assistant-edit`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body: JSON.stringify({ instruction: editInstruction.value.trim(), apply: true }),
+        });
+        const data = await res.json();
+        if (data.content_item) {
+            activePost.value.content = data.content_item.content;
+            activePost.value.status = data.content_item.status;
+        } else if (data.error) { alert('⚠️ ' + data.error); }
+    } catch (e) { alert('Fehler: ' + e.message); }
+    editLoading.value = false;
+    editInstruction.value = '';
+}
+
+// Manuelles Editieren (direkt im Textarea) → speichern
+async function saveManualEdit() {
+    if (!activePost.value) return;
+    await router.patch(`/api/content/${activePost.value.id}`, { content: activePost.value.content }, { preserveState: true });
+}
+
+async function approveToOutput(p) {
+    if (p.variant_group_id) {
+        const res = await fetch(`/api/content/${p.id}/select-variant`, { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf() } });
+        const data = await res.json();
+        if (data.selected) {
+            for (const g of posts.value) {
+                if (g.id === data.selected.id) g.status = 'geplant';
+                else if (g.variant_group_id === data.selected.variant_group_id) g.status = 'verworfen';
+            }
+        }
+    } else {
+        await router.patch(`/api/content/${p.id}`, { status: 'geplant' }, { preserveState: true });
+        p.status = 'geplant';
+    }
+    // aktive (nicht verworfene) bleiben im Editor sichtbar
+    posts.value = posts.value.filter(x => x.status !== 'verworfen');
+}
+
+function dismiss(p) {
+    p.status = 'verworfen';
+    posts.value = posts.value.filter(x => x.status !== 'verworfen');
+    if (activePostId.value === p.id) activePostId.value = posts.value[0]?.id || null;
+}
+
+onMounted(recommendStatement);
 </script>
 
 <template>
     <AppLayout>
-        <div class="mb-6">
-            <a href="/angles" class="text-sm text-gray-400 hover:text-gray-400">← Zurück zu Angles</a>
+        <div class="mb-4">
+            <a href="/angles" class="text-sm text-gray-400 hover:text-gray-700">← Zurück zu Angles</a>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Main Info -->
-            <div class="lg:col-span-2 space-y-6">
-                <div class="neu-card p-6">
-                    <div class="flex items-start justify-between mb-4">
-                        <div>
-                            <h2 class="text-xl font-bold text-gray-800">{{ angle.id }}</h2>
-                            <p class="text-sm text-gray-400 mt-1">{{ angle.strategy?.name || '—' }} · {{ angle.batch_key || 'Kein Batch' }}</p>
+        <!-- ===================== TOP: Header + Score ===================== -->
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5 mb-5">
+            <!-- Header -->
+            <div class="neu-card p-5">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 mb-2 flex-wrap">
+                            <h2 class="text-lg font-bold text-gray-900 font-mono">{{ angle.id }}</h2>
+                            <span class="text-xs text-gray-400">{{ angle.strategy?.name || '—' }} · {{ angle.batch_key || 'Kein Batch' }}</span>
                         </div>
-                        <select
-                            v-model="status"
-                            @change="setStatus"
-                            class="text-xs px-3 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-green-500/30"
-                            :class="statusClasses[status] || 'bg-gray-100 text-gray-600'"
-                        >
-                            <option v-for="opt in statusOptions" :key="opt" :value="opt">{{ statusLabels[opt] || opt }}</option>
-                        </select>
+                        <p class="text-base text-gray-800 leading-relaxed">{{ angle.angle }}</p>
                     </div>
+                    <select v-model="status" @change="setStatus" class="text-xs px-2 py-1 rounded-full border-0 cursor-pointer shrink-0" :class="statusClasses[status]">
+                        <option v-for="o in statusOptions" :key="o" :value="o">{{ statusLabels[o] }}</option>
+                    </select>
+                </div>
+                <div class="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
+                    <span><span class="text-gray-400">ICP</span> <span class="text-gray-800 font-medium">{{ angle.icp || '—' }}</span></span>
+                    <span><span class="text-gray-400">Cluster</span> <span class="text-gray-800">{{ angle.pain_cluster || '—' }}</span></span>
+                    <span><span class="text-gray-400">Statement</span> <span class="text-gray-800">{{ angle.statement_type || '—' }}</span></span>
+                    <span><span class="text-gray-400">Funnel</span> <span class="text-gray-800">{{ angle.funnel || '—' }}</span></span>
+                </div>
+            </div>
 
-                    <div class="prose prose-invert max-w-none">
-                        <p class="text-lg text-gray-800 leading-relaxed">{{ angle.angle }}</p>
-                    </div>
-
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                        <div>
-                            <div class="text-xs text-gray-400 uppercase">ICP</div>
-                            <div class="text-sm text-gray-800 mt-1">
-                                <span class="font-semibold">{{ angle.icp || '—' }}</span>
-                                <span v-if="angle.icp_name && angle.icp_name !== angle.icp" class="text-gray-500"> · {{ angle.icp_name }}</span>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="text-xs text-gray-400 uppercase">Pain Cluster</div>
-                            <div class="text-sm text-gray-800 mt-1">{{ angle.pain_cluster || '—' }}</div>
-                        </div>
-                        <div>
-                            <div class="text-xs text-gray-400 uppercase">Statement Typ</div>
-                            <div class="text-sm text-gray-800 mt-1">{{ angle.statement_type || '—' }}</div>
-                        </div>
-                        <div>
-                            <div class="text-xs text-gray-400 uppercase">Funnel</div>
-                            <div class="text-sm text-gray-800 mt-1">{{ angle.funnel || '—' }}</div>
-                        </div>
-                    </div>
-
-                    <div v-if="angle.source" class="mt-6 p-4 neu-card-sm">
-                        <div class="text-xs text-gray-400 uppercase mb-1">Quelle</div>
-                        <div class="text-sm text-gray-800">{{ angle.source.title }}</div>
-                        <div class="text-xs text-gray-400 mt-1">{{ angle.source.type }} · {{ angle.source.visibility }}</div>
+            <!-- Score (kompakt, hover für Details) -->
+            <div class="neu-card p-5 relative">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="text-3xl font-bold" :class="angle.ranking_score >= 10 ? 'text-green-600' : angle.ranking_score >= 7 ? 'text-yellow-600' : 'text-red-600'">{{ angle.ranking_score ?? '—' }}</span>
+                    <span class="text-xs text-gray-400">/12 · Rang {{ angle.ranking_rang ?? '—' }}</span>
+                </div>
+                <div @mouseenter="showScoreDetail = true" @mouseleave="showScoreDetail = false">
+                    <div v-for="(label, key) in criteriaLabels" :key="key" class="mb-1.5">
+                        <div class="flex justify-between mb-0.5"><span class="text-[10px] text-gray-400 uppercase">{{ label }}</span><span class="text-[10px] text-gray-600 font-medium">{{ rankings[key] }}/3</span></div>
+                        <div class="h-1 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-indigo-500 rounded-full" :style="{ width: ((rankings[key] || 0) / 3) * 100 + '%' }"></div></div>
                     </div>
                 </div>
-
-                <!-- Linked Content Items -->
-                <div class="neu-card">
-                    <div class="p-6 border-b border-neu-border">
-                        <h3 class="text-lg font-semibold text-gray-800">Zugeordnete Posts</h3>
+                <div v-if="showScoreDetail" class="absolute top-full left-4 right-4 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-20">
+                    <div class="space-y-2">
+                        <div v-for="(label, key) in criteriaLabels" :key="key">
+                            <p class="text-xs font-medium text-gray-700">{{ label }} — {{ rankings[key] }}</p>
+                            <p class="text-[11px] text-gray-500">{{ criteriaHint[key] }}</p>
+                        </div>
                     </div>
-                    <div class="divide-y divide-gray-800">
-                        <div v-for="item in angle.content_items" :key="item.id" class="p-4">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="text-sm text-gray-800">{{ item.title || item.content?.substring(0, 80) }}</p>
-                                    <p class="text-xs text-gray-400 mt-1">{{ item.format }} · {{ item.status }}</p>
-                                </div>
-                                <div class="flex gap-2">
-                                    <span v-for="m in item.media" :key="m.id" class="text-xs px-2 py-1 rounded bg-neu text-gray-400">
-                                        {{ m.type }}: {{ m.status }}
-                                    </span>
-                                </div>
+                    <p v-if="angle.score_reasoning" class="text-[11px] text-gray-600 mt-2 bg-blue-50 rounded p-2">{{ angle.score_reasoning }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== UNTEN: Editor (75%) + Produzieren (25%) ===================== -->
+        <div class="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-5">
+            <!-- Editor -->
+            <div class="space-y-4">
+                <div v-if="!posts.length" class="neu-card p-10 text-center text-gray-400" style="min-height: 400px;">
+                    <p class="text-4xl mb-2">📝</p>
+                    <p class="text-sm">Wähle rechts einen Post-Typ und ein Template → „Post generieren".</p>
+                    <p class="text-xs mt-1">Der generierte Post erscheint hier als Editor.</p>
+                </div>
+
+                <template v-else>
+                    <!-- Varianten-Tabs -->
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button v-for="p in posts" :key="p.id" @click="selectPost(p)"
+                            class="px-3 py-1.5 rounded-lg text-xs border"
+                            :class="activePostId === p.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'">
+                            {{ p.variant_pattern || 'Variante' }}
+                            <span v-if="p.status === 'geplant'" class="ml-1 text-green-400">✓</span>
+                        </button>
+                    </div>
+
+                    <!-- Editor -->
+                    <div v-if="activePost" class="neu-card p-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-semibold text-gray-600">{{ formatLabels[activePost.format] }}</span>
+                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{{ activePost.variant_pattern }}</span>
+                                <span class="text-xs font-mono text-gray-300">{{ activePost.id }}</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="dismiss(activePost)" class="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600">Verwerfen</button>
+                                <button @click="approveToOutput(activePost)" :disabled="activePost.status === 'geplant'"
+                                    class="text-xs px-3 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
+                                    {{ activePost.status === 'geplant' ? '✓ In Output' : '→ Zum Output' }}
+                                </button>
                             </div>
                         </div>
-                        <div v-if="!angle.content_items?.length" class="p-8 text-center text-gray-400">
-                            Noch keine Posts für diesen Angle
+
+                        <!-- Editor-ähnliche Textarea (automatisch hohe Fläche) -->
+                        <textarea v-model="activePost.content" rows="22"
+                            class="w-full bg-white border border-gray-200 rounded-lg p-5 text-[15px] text-gray-900 leading-relaxed font-serif resize-y focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-200"
+                            placeholder="Post-Text…"></textarea>
+                        <div class="flex items-center justify-between mt-2">
+                            <span class="text-xs text-gray-400">{{ (activePost.content || '').length }} Zeichen</span>
+                            <button @click="saveManualEdit" class="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">💾 Manuelle Änderung speichern</button>
+                        </div>
+
+                        <!-- Assistant-Edit -->
+                        <div class="mt-4 border-t border-gray-100 pt-3">
+                            <p class="text-xs text-gray-500 font-medium mb-2">🤖 Assistant-Anweisung:</p>
+                            <div class="flex gap-2">
+                                <input v-model="editInstruction" @keydown.enter="submitEdit"
+                                    class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-green-500"
+                                    placeholder="z. B. Mach den Hook schärfer, kürze auf 800 Zeichen…" />
+                                <button @click="submitEdit" :disabled="editLoading || !editInstruction.trim()"
+                                    class="px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                    {{ editLoading ? '…' : 'Überarbeiten' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Bestehende Posts -->
+                <div v-if="angle.content_items?.length" class="neu-card">
+                    <div class="p-4 border-b border-gray-100"><h3 class="text-sm font-semibold text-gray-800">Bestehende Posts</h3></div>
+                    <div class="divide-y divide-gray-100">
+                        <div v-for="item in angle.content_items" :key="item.id" class="px-4 py-2.5 flex items-center justify-between text-sm">
+                            <div>
+                                <p class="text-gray-800">{{ item.title || item.content?.substring(0, 70) }}</p>
+                                <p class="text-xs text-gray-400">{{ item.format }} · {{ item.status }}</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Ranking Sidebar -->
-            <div class="space-y-6">
-                <div class="neu-card p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Ranking</h3>
+            <!-- Produzieren Sidebar (25%) -->
+            <div class="neu-card p-4 h-fit">
+                <h3 class="text-sm font-semibold text-gray-800 mb-3">🚀 Produzieren</h3>
 
-                    <div class="text-center mb-6">
-                        <div class="text-5xl font-bold" :class="angle.ranking_score >= 10 ? 'text-green-600' : angle.ranking_score >= 7 ? 'text-yellow-600' : 'text-red-600'">
-                            {{ angle.ranking_score ?? '—' }}
-                        </div>
-                        <div class="text-sm text-gray-400 mt-1">Score</div>
-                        <div class="text-xs text-gray-400 mt-1">Rang {{ angle.ranking_rang ?? '—' }}</div>
+                <!-- Post-Typ -->
+                <label class="text-[10px] text-gray-400 uppercase font-medium">Post-Typ</label>
+                <select v-model="activeFormat" @change="selectFormat(activeFormat)" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
+                    <option v-for="fmt in availableFormats" :key="fmt" :value="fmt">{{ formatLabels[fmt] || fmt }}</option>
+                </select>
+                <p class="text-[11px] text-gray-400 mb-3">{{ formatDesc[activeFormat] }}</p>
+
+                <!-- Statement-Typ -->
+                <label class="text-[10px] text-gray-400 uppercase font-medium">Statement-Typ <span class="text-indigo-500">(auto)</span></label>
+                <select v-model="statementType" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
+                    <option v-for="o in statementOptions" :key="o" :value="o">{{ o }}</option>
+                </select>
+                <p v-if="statementReason" class="text-[11px] text-gray-500 mb-3">💡 {{ statementReason }}</p>
+
+                <!-- Templates -->
+                <label class="text-[10px] text-gray-400 uppercase font-medium mb-1">Template(s)</label>
+                <div class="space-y-1 max-h-40 overflow-y-auto mb-3">
+                    <div v-for="tpl in filteredTemplates" :key="tpl.name" @click="toggleTemplate(tpl)"
+                        class="flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs"
+                        :class="isSelected(tpl.name) ? 'bg-green-50 border-green-300' : 'bg-white border-gray-200 hover:border-gray-300'">
+                        <span :class="isSelected(tpl.name) ? 'text-green-600' : 'text-gray-300'">{{ isSelected(tpl.name) ? '✓' : '○' }}</span>
+                        <span class="text-gray-800 truncate" :title="tpl.description">{{ tpl.name }}</span>
                     </div>
-
-                    <div v-for="(label, key) in criteriaLabels" :key="key" class="mb-4">
-                        <div class="flex items-center justify-between mb-1">
-                            <label class="text-sm text-gray-400">{{ label }}</label>
-                            <span class="text-sm font-bold text-gray-800">{{ rankings[key] }}</span>
-                        </div>
-                        <input
-                            type="range"
-                            v-model.number="rankings[key]"
-                            min="0"
-                            max="3"
-                            step="1"
-                            class="w-full h-2 neu-card-sm appearance-none cursor-pointer accent-indigo-500"
-                            @change="updateRanking"
-                        />
-                        <div class="flex justify-between text-xs text-gray-400 mt-1">
-                            <span>0</span><span>1</span><span>2</span><span>3</span>
-                        </div>
-                    </div>
-
-                    <div v-if="saving" class="text-xs text-gray-400 mt-2">Speichern...</div>
+                    <p v-if="!filteredTemplates.length" class="text-[11px] text-gray-400 italic py-1">Keine Templates.</p>
                 </div>
 
-                <!-- Score-Begründung -->
-                <div v-if="angle.score_reasoning" class="neu-card p-6">
-                    <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Scoring-Begründung</h3>
-                    <p class="text-sm text-gray-800 leading-relaxed">{{ angle.score_reasoning }}</p>
-                </div>
-
-                <!-- Duplikat-Hinweis -->
-                <div v-if="angle.duplicate_of_id" class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                    <p class="text-xs font-semibold text-yellow-700 mb-1">⚠ Mögliches Duplikat</p>
-                    <p class="text-sm text-yellow-700">
-                        Ähnlichkeit {{ Math.round((angle.similarity_score || 0) * 100) }}% zu
-                        <a :href="`/angles/${angle.duplicate_of_id}`" class="underline">{{ angle.duplicate_of_id }}</a>
-                    </p>
-                </div>
-
-                <!-- Produzieren -->
-                <div class="neu-card p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-3">Produzieren</h3>
-
-                    <!-- Template-Auswahl -->
-                    <div v-if="templates?.length" class="space-y-2 mb-4">
-                        <p class="text-xs text-gray-500 font-medium">Template wählen:</p>
-                        <div v-for="tpl in templates" :key="tpl.name"
-                            class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors text-sm"
-                            :class="isSelected(tpl.name) ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'"
-                            @click="toggleTemplate(tpl)">
-                            <span class="text-xs" :class="isSelected(tpl.name) ? 'text-green-600' : 'text-gray-400'">{{ isSelected(tpl.name) ? '✓' : '○' }}</span>
-                            <span class="font-medium">{{ tpl.name }}</span>
-                            <span class="text-xs text-gray-400 ml-auto">{{ tpl.format }}</span>
-                        </div>
-                    </div>
-                    <div v-else class="text-xs text-gray-400 italic mb-4">
-                        Keine Templates in der Strategie ausgewählt.
-                        <a href="/strategie" class="text-green-600 underline">Strategie bearbeiten</a>
-                    </div>
-
-                    <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
-                        class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                        {{ generating ? 'Generiere…' : '🚀 ' + selectedTemplates.length + ' Varianten generieren' }}
-                    </button>
-
-                    <!-- Ergebnis -->
-                    <div v-if="generateResult" class="mt-4 space-y-3">
-                        <div v-if="generateResult.error" class="text-sm text-red-600">{{ generateResult.error }}</div>
-                        <div v-for="item in (generateResult.items || [])" :key="item.id"
-                            class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <div class="flex items-center justify-between mb-1">
-                                <span class="text-xs font-medium text-gray-600">{{ item.variant_pattern || 'Standard' }}</span>
-                                <span class="text-xs text-gray-400">{{ item.id }}</span>
-                            </div>
-                            <p class="text-sm text-gray-900 whitespace-pre-line line-clamp-4">{{ item.content }}</p>
-                            <div class="mt-2 flex gap-2">
-                                <a :href="`/output`" class="text-xs text-green-600 underline">Im Output ansehen</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
+                    class="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium disabled:opacity-50">
+                    {{ generating ? 'Generiere…' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
+                </button>
             </div>
         </div>
     </AppLayout>

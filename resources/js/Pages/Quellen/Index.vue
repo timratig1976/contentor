@@ -38,20 +38,64 @@ function openMonitoring(source) {
 function closeMonitoring() { monitoringSource.value = null; }
 
 async function toggleMonitoring(source) {
-    await router.patch(`/api/sources/${source.id}`, { monitor: !source.monitor }, {
-        preserveState: true, preserveScroll: true,
-        onSuccess: closeMonitoring,
+    const res = await fetch(`/api/sources/${source.id}`, {
+        method: 'PATCH',
+        headers: { 'X-CSRF-TOKEN': csrf(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitor: !source.monitor }),
     });
+    if (res.ok) {
+        closeMonitoring();
+        router.reload({ preserveState: true, preserveScroll: true });
+    }
 }
+
+// ─── Manuelles Re-Crawlen (nur URL-Quellen) ───
+const crawlingId = ref(null);
+const crawlMsg = ref('');
+
+async function crawlSource(source) {
+    if (crawlingId.value) return;
+    crawlingId.value = source.id;
+    crawlMsg.value = '';
+    try {
+        const res = await fetch(`/api/sources/${source.id}/crawl`, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': csrf(), 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const status = data.crawl?.status;
+            if (status === 'changed') crawlMsg.value = `✅ ${source.id}: Änderung erkannt — ${data.crawl?.angles_created || 0} Angles erstellt.`;
+            else if (status === 'unchanged') crawlMsg.value = `ℹ️ ${source.id}: Keine Änderung.`;
+            else crawlMsg.value = `⚠️ ${source.id}: Crawl-Fehler.`;
+            router.reload({ preserveState: true, preserveScroll: true });
+        } else {
+            crawlMsg.value = '⚠️ ' + (data.message || 'Fehler.');
+        }
+    } catch (e) {
+        crawlMsg.value = '⚠️ ' + e.message;
+    } finally {
+        crawlingId.value = null;
+    }
+}
+
 async function saveMonitoringUrl() {
     if (!monitoringSource.value.url) return;
     monitoringSaving.value = true;
     try {
-        await router.patch(`/api/sources/${monitoringSource.value.id}`, {
-            url: monitoringSource.value.url,
-            frequency: monitoringSource.value.frequency,
-            monitor: true,
-        }, { preserveState: true, preserveScroll: true, onSuccess: closeMonitoring });
+        const res = await fetch(`/api/sources/${monitoringSource.value.id}`, {
+            method: 'PATCH',
+            headers: { 'X-CSRF-TOKEN': csrf(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: monitoringSource.value.url,
+                frequency: monitoringSource.value.frequency,
+                monitor: true,
+            }),
+        });
+        if (res.ok) {
+            closeMonitoring();
+            router.reload({ preserveState: true, preserveScroll: true });
+        }
     } finally { monitoringSaving.value = false; }
 }
 function fmtDate(d) { return d ? new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; }
@@ -62,6 +106,7 @@ function fmtDate(d) { return d ? new Date(d).toLocaleString('de-DE', { day: '2-d
         <div class="mb-6">
             <h2 class="text-2xl font-bold text-gray-800">Quellen</h2>
             <p class="text-gray-400 mt-1">{{ sources?.total || 0 }} Quellen</p>
+            <p v-if="crawlMsg" class="text-sm mt-2" :class="crawlMsg.startsWith('✅') ? 'text-green-600' : crawlMsg.startsWith('⚠️') ? 'text-red-600' : 'text-gray-600'">{{ crawlMsg }}</p>
         </div>
 
         <!-- Filters -->
@@ -117,20 +162,34 @@ function fmtDate(d) { return d ? new Date(d).toLocaleString('de-DE', { day: '2-d
                         <td class="px-6 py-4 text-sm text-gray-400">{{ s.batch_key || '—' }}</td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ s.strategy?.name || '—' }}</td>
                         <td class="px-6 py-4">
-                            <div v-if="s.monitor" class="flex items-center gap-2">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-full">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                                    Auto-Scrape · {{ s.frequency }}
+                            <template v-if="s.type === 'url' && s.url">
+                                <div v-if="s.monitor" class="flex items-center gap-2">
+                                    <span class="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-full">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                                        Auto-Scrape · {{ s.frequency }}
+                                    </span>
+                                    <span class="text-xs text-gray-400" :title="'Zuletzt geprüft'">{{ fmtDate(s.last_checked_at) }}</span>
+                                    <button @click="crawlSource(s)" :disabled="crawlingId === s.id"
+                                        class="text-xs px-2 py-1 rounded-md border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50"
+                                        :title="'Jetzt manuell crawlen'">
+                                        {{ crawlingId === s.id ? '↻ …' : '↻ Crawl' }}
+                                    </button>
+                                    <button @click="toggleMonitoring(s)" class="text-xs text-gray-400 hover:text-red-500" title="Monitoring stoppen">✕</button>
+                                </div>
+                                <span v-else class="inline-flex items-center gap-1.5 text-xs text-gray-500 border border-gray-200 px-2 py-1 rounded-full">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>
+                                    Kein Auto-Scrape
+                                    <button @click="crawlSource(s)" :disabled="crawlingId === s.id"
+                                        class="text-gray-400 hover:text-green-600 disabled:opacity-50 ml-1" title="Einmalig crawlen">
+                                        {{ crawlingId === s.id ? '↻' : '↻' }}
+                                    </button>
+                                    <button @click="toggleMonitoring(s)" class="text-gray-400 hover:text-green-600" title="Monitoring starten">▶</button>
                                 </span>
-                                <span class="text-xs text-gray-400" :title="'Zuletzt geprüft'">{{ fmtDate(s.last_checked_at) }}</span>
-                                <button @click="toggleMonitoring(s)" class="text-xs text-gray-400 hover:text-red-500" title="Monitoring stoppen">✕</button>
-                            </div>
-                            <span v-else-if="s.url" class="inline-flex items-center gap-1.5 text-xs text-gray-500 border border-gray-200 px-2 py-1 rounded-full">
-                                <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>
-                                Kein Auto-Scrape
-                                <button @click="toggleMonitoring(s)" class="text-gray-400 hover:text-green-600" title="Monitoring starten">▶</button>
-                            </span>
-                            <button v-else @click="openMonitoring(s)" class="text-xs text-gray-400 hover:text-green-600" title="URL ergänzen & überwachen">URL + Überwachen</button>
+                            </template>
+                            <button v-else-if="s.type === 'url'" @click="openMonitoring(s)"
+                                class="text-xs px-2 py-1 rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-green-400 hover:text-green-600"
+                                title="URL ergänzen & überwachen">+ URL</button>
+                            <span v-else class="text-xs text-gray-300">—</span>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ new Date(s.created_at).toLocaleDateString('de-DE') }}</td>
                     </tr>

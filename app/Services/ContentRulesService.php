@@ -71,6 +71,76 @@ class ContentRulesService
     }
 
     /**
+     * Alle gültigen Statement-Typen (kanonisch, für UI + Validierung).
+     */
+    public const STATEMENT_TYPES = [
+        'Direkt', 'Drastisch', 'Bedrohlich', 'Gain', 'Mechanismus', 'Vision', 'Sarkastisch',
+    ];
+
+    /**
+     * Kurzer Schreib-Hinweis pro Statement-Typ (wird in den LLM-Prompt injiziert),
+     * damit der Content den gewählten Frame tatsächlich trifft.
+     */
+    public const STATEMENT_TYPE_HINTS = [
+        'Direkt'      => 'Formuliere sachlich und direkt — eine klare, unmissverständliche Aussage ohne Drama.',
+        'Drastisch'   => 'Formuliere hart und alarmierend — betone die drastische Konsequenz, wenn nichts passiert.',
+        'Bedrohlich'  => 'Formuliere als drohende Konsequenz — mache klar, was das Problem kostet, wenn es ignoriert wird.',
+        'Gain'        => 'Formuliere ergebnis-/nutzenorientiert — stelle den positiven Outcome und den Gewinn in den Vordergrund.',
+        'Mechanismus' => 'Formuliere erklärend — erläutere den Mechanismus/Wirkzusammenhang hinter der Aussage.',
+        'Vision'      => 'Formuliere visionär — zeichne ein Bild des erstrebenswerten Zielzustands.',
+        'Sarkastisch' => 'Formuliere mit spitzer, leis ironischer Zuspitzung — ohne giftig zu werden.',
+    ];
+
+    /**
+     * Empfiehlt den passendsten Statement-Typ anhand von Format, Funnel und Text.
+     * Liefert Typ + Begründung zurück — der Nutzer kann im UI übersteuern.
+     *
+     * @return array{type: string, reason: string}
+     */
+    public function recommendStatementType(?string $format, ?string $funnel, ?string $icp = null, string $angleText = ''): array
+    {
+        // 1) Kanal/Format dominiert
+        if ($format === 'landing_page_headlines') {
+            return ['type' => 'Gain', 'reason' => 'Landing Pages müssen einen klaren Nutzen/Outcome versprechen — ein Gain-Frame konvertiert hier am besten.'];
+        }
+        if ($format === 'ad_copy') {
+            $dramatic = preg_match('/roi|zahl|kosten|€|\$|%|\d/i', $angleText);
+            return $dramatic
+                ? ['type' => 'Drastisch', 'reason' => 'Bezahlte Ads brauchen einen klaren Pain-Frame. Da der Angle konkrete Zahlen/Kosten nennt, wirkt ein drastischer Frame am stärksten.']
+                : ['type' => 'Bedrohlich', 'reason' => 'Bezahlte Ads brauchen einen klaren Pain-Frame — bei einem eher qualitativen Problem ist ein bedrohlicher (Konsequenz-)Frame passend.'];
+        }
+        if ($format === 'newsletter_bk') {
+            return ['type' => 'Mechanismus', 'reason' => 'Bestandskunden-Newsletter dürfen nicht alarmieren — hier überzeugt ein erklärender Mechanismus-Frame (so funktioniert es).'];
+        }
+
+        // 2) Funnel-Stufe
+        $funnelMap = [
+            'ToFu' => ['type' => 'Drastisch', 'reason' => 'ToFu (Aufmerksamkeit erzeugen): ein drastischer Frame bricht durch den News-Feed und stoppt das Scrollen.'],
+            'MoFu' => ['type' => 'Mechanismus', 'reason' => 'MoFu (Überzeugen): hier zählt Erklärung — ein Mechanismus-Frame liefert den Wirkzusammenhang, der Vertrauen schafft.'],
+            'BoFu' => ['type' => 'Gain', 'reason' => 'BoFu (Abschluss): kurz vor der Entscheidung überzeugt der konkrete Nutzen — ein Gain-Frame macht den Outcome greifbar.'],
+        ];
+        if ($funnel && isset($funnelMap[$funnel])) {
+            return $funnelMap[$funnel];
+        }
+
+        // 3) Text-Heuristik: konträr/harte Aussage → drastisch
+        if (preg_match('/kostet|scheitert|blindflug|insellösung|siloolösung|kein[\w\s]{0,20}sondern|hängt an personen/i', $angleText)) {
+            return ['type' => 'Drastisch', 'reason' => 'Der Angle formuliert eine harte, konträre Konsequenz (Kosten/Scheitern) — das verlangt einen drastischen Frame.'];
+        }
+
+        // 4) Default: sachlich-direkt
+        return ['type' => 'Direkt', 'reason' => 'Kein spezieller Frame nötig — eine klare, direkte Aussage transportiert den Angle am verständlichsten.'];
+    }
+
+    /**
+     * Schreib-Hinweis für einen Statement-Typ (LLM-Prompt-Injection).
+     */
+    public function statementTypeHint(string $statementType): ?string
+    {
+        return self::STATEMENT_TYPE_HINTS[$statementType] ?? null;
+    }
+
+    /**
      * Guess ICP from input text using unit's ICP guesser rules.
      */
     public function guessIcp(string $input, ?string $explicitIcp, Strategy $strategy): string

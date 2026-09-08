@@ -33,6 +33,23 @@ class Source extends Model
         return $this->hasMany(Angle::class, 'source_id');
     }
 
+    /**
+     * URL-Accessor: fällt auf `file_ref` zurück, falls die dedizierte
+     * `url`-Spalte leer ist (historische Daten pre-Monitoring).
+     */
+    public function getUrlAttribute(?string $value): ?string
+    {
+        if (! empty($value)) {
+            return $value;
+        }
+
+        if ($this->type === 'url' && $this->file_ref && str_starts_with($this->file_ref, 'http')) {
+            return $this->file_ref;
+        }
+
+        return $value;
+    }
+
     protected static function boot(): void
     {
         parent::boot();

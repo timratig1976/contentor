@@ -3,6 +3,8 @@
 .env
 .env.backup
 .env.production
+/content-agent/trace_output.json
+/content-agent/__pycache__/
 .phpactor.json
 .phpunit.result.cache
 /.codex

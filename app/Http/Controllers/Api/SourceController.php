@@ -68,6 +68,26 @@ class SourceController extends Controller
     }
 
     /**
+     * Manuelles Re-Crawlen einer URL-Quelle (Change-Detection via Hash).
+     * Nur für Quellen vom Typ "url" mit hinterlegter URL.
+     */
+    public function crawl(Request $request, Source $source): JsonResponse
+    {
+        if ($source->type !== 'url' || empty($source->url)) {
+            return response()->json([
+                'message' => 'Nur Quellen mit hinterlegter URL können gecrawlt werden.',
+            ], 422);
+        }
+
+        $result = app(\App\Services\SourceMonitorService::class)->checkSource($source);
+
+        return response()->json([
+            'source' => $source->fresh(),
+            'crawl' => $result,
+        ]);
+    }
+
+    /**
      * Quelle aktualisieren — inkl. Monitoring (URL, aktiv, Frequenz).
      * Beim (Re-)Aktivieren von Monitoring: sofortiger Erst-Crawl.
      */
@@ -84,15 +104,19 @@ class SourceController extends Controller
         $source->update($validated);
 
         $startedFreshCrawl = false;
+        $fresh = $source->fresh();
 
-        // Neu überwacht (oder URL gewechselt) → sofort ersten Crawl ausführen
-        if (($validated['monitor'] ?? false) && (! $wasMonitored || isset($validated['url']))) {
-            app(\App\Services\SourceMonitorService::class)->checkSource($source->fresh());
-            $startedFreshCrawl = true;
-        } elseif (isset($validated['url']) && $source->monitor) {
-            $source->update(['content_hash' => null, 'last_checked_at' => null]);
-            app(\App\Services\SourceMonitorService::class)->checkSource($source->fresh());
-            $startedFreshCrawl = true;
+        // Nur crawlen, wenn tatsächlich eine URL vorhanden ist.
+        if (! empty($fresh->url)) {
+            // Neu überwacht (oder URL gewechselt) → sofort ersten Crawl ausführen
+            if (($validated['monitor'] ?? false) && (! $wasMonitored || isset($validated['url']))) {
+                app(\App\Services\SourceMonitorService::class)->checkSource($fresh);
+                $startedFreshCrawl = true;
+            } elseif (isset($validated['url']) && $fresh->monitor) {
+                $fresh->update(['content_hash' => null, 'last_checked_at' => null]);
+                app(\App\Services\SourceMonitorService::class)->checkSource($fresh->fresh());
+                $startedFreshCrawl = true;
+            }
         }
 
         if ($request->header('X-Inertia')) {

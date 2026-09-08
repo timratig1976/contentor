@@ -246,6 +246,63 @@ function toggleLog(id) {
     s.has(id) ? s.delete(id) : s.add(id);
     expandedLogs.value = s;
 }
+
+// ─── Workflow-Runner (in-browser) + Verlauf ─────────────────────────────
+const wfInput = ref('');
+const wfRunning = ref(false);
+const wfResult = ref(null);      // aktueller/selektierter Lauf
+const workflowRuns = ref([]);
+const wfLoading = ref(false);
+
+async function loadWorkflowRuns() {
+    wfLoading.value = true;
+    try {
+        const res = await fetch('/api/workflow/runs');
+        workflowRuns.value = await res.json();
+    } catch (e) { /* silent */ }
+    finally { wfLoading.value = false; }
+}
+
+async function runWorkflow() {
+    if (!wfInput.value.trim() || wfRunning.value) return;
+    wfRunning.value = true;
+    wfResult.value = null;
+    try {
+        const res = await fetch('/api/workflow/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify({ input: wfInput.value.trim() }),
+        });
+        const data = await res.json();
+        if (data.run) {
+            wfResult.value = data.run;
+            await loadWorkflowRuns();
+            pollWorkflow(data.run.id);
+        }
+    } catch (e) { alert('Fehler: ' + e.message); }
+    finally { wfRunning.value = false; }
+}
+
+async function pollWorkflow(id, attempts = 0) {
+    if (attempts > 40) return; // max ~ 6-7 min
+    setTimeout(async () => {
+        try {
+            const res = await fetch(`/api/workflow/runs/${id}`);
+            const run = await res.json();
+            wfResult.value = run;
+            await loadWorkflowRuns();
+            if (run.status === 'running' && attempts < 40) {
+                pollWorkflow(id, attempts + 1);
+            }
+        } catch (e) { /* silent */ }
+    }, 8000);
+}
+
+function showRun(run) { wfResult.value = run; }
+function fmtTs(d) { return d ? new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; }
+function runStatusClass(s) { return s === 'success' ? 'bg-green-50 text-green-700' : s === 'error' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'; }
+
+onMounted(() => { loadWorkflowRuns(); });
 </script>
 
 <template>
@@ -282,9 +339,52 @@ function toggleLog(id) {
                 </div>
 
                 <div class="neu-card p-5 mt-6">
-                    <h3 class="text-sm font-medium text-gray-800 mb-2">Workflow starten</h3>
-                    <code class="text-xs text-gray-400 bg-neu px-3 py-2 rounded-md block">cd content-agent && python3 main.py</code>
-                    <p class="text-xs text-gray-400 mt-2">Ergebnisse: <a href="/quellen" class="text-gray-400 hover:text-gray-800">Quellen</a> · <a href="/angles" class="text-gray-400 hover:text-gray-800">Angles</a> · <a href="/redaktionsplan" class="text-gray-400 hover:text-gray-800">Redaktionsplan</a></p>
+                    <h3 class="text-sm font-medium text-gray-800 mb-3">▶ Workflow starten & Datenfluss-Debug</h3>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <!-- Input + Run -->
+                        <div class="lg:col-span-1 space-y-3">
+                            <p class="text-xs text-gray-500">Führt den gesamten Multi-Agent-Workflow aus und protokolliert jeden Schritt (Prompts, Tool-Calls, Ergebnisse).</p>
+                            <textarea v-model="wfInput" rows="4"
+                                class="w-full bg-neu  rounded-lg p-3 text-sm text-gray-800 focus:outline-none focus:border-gray-400"
+                                placeholder="z. B. Recherchiere zum Thema CRM-Datenqualität und produziere LinkedIn-Posts"></textarea>
+                            <button @click="runWorkflow" :disabled="wfRunning || !wfInput.trim()"
+                                class="w-full px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                                {{ wfRunning ? 'Starte…' : '▶ Workflow starten' }}
+                            </button>
+                            <p class="text-[11px] text-gray-400">Voraussetzung: <code class="bg-neu px-1 rounded">content-agent/.env</code> mit EDENAI_API_KEY + <code class="bg-neu px-1 rounded">pip install -r requirements.txt</code></p>
+                        </div>
+
+                        <!-- Console/Debug -->
+                        <div class="lg:col-span-2">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Console / Trace</h4>
+                                <span v-if="wfResult" class="text-xs px-2 py-1 rounded-full" :class="runStatusClass(wfResult.status)">{{ wfResult.status }}</span>
+                            </div>
+                            <div class="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-xs text-gray-200 whitespace-pre-wrap">
+                                <span v-if="!wfResult" class="text-gray-500">Noch kein Lauf. Gib oben eine Aufgabe ein und starte den Workflow.</span>
+                                <span v-else-if="wfResult.status === 'running'" class="text-blue-300">⏳ Workflow läuft… (Ergebnis erscheint hier automatisch)</span>
+                                <pre v-else class="whitespace-pre-wrap">{{ wfResult.output || wfResult.trace || '(Kein Output)' }}</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- History -->
+                    <div class="mt-5 border-t border-neu-border pt-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Verlauf (automatische Historie)</h4>
+                            <button @click="loadWorkflowRuns" class="text-xs text-gray-400 hover:text-green-600">↻ Aktualisieren</button>
+                        </div>
+                        <div v-if="workflowRuns.length === 0" class="text-xs text-gray-400 py-2">Noch keine Läufe.</div>
+                        <div v-else class="space-y-1.5 max-h-48 overflow-y-auto">
+                            <div v-for="run in workflowRuns" :key="run.id" @click="showRun(run)"
+                                class="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-gray-200 hover:bg-gray-50 cursor-pointer">
+                                <span class="text-xs px-2 py-0.5 rounded-full shrink-0" :class="runStatusClass(run.status)">#{{ run.id }} · {{ run.status }}</span>
+                                <span class="text-xs text-gray-700 truncate flex-1">{{ run.input || '(ohne Input)' }}</span>
+                                <span class="text-xs text-gray-400 shrink-0">{{ fmtTs(run.created_at) }}</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- WORKFLOW & LOOPS -->

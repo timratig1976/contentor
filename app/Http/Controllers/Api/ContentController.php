@@ -20,6 +20,33 @@ class ContentController extends Controller
         private MediaBriefingService $mediaService,
     ) {}
 
+    /**
+     * Empfiehlt einen Statement-Typ inkl. Begründung für eine Format/Funnel-Kombination.
+     * Wird vom Produzieren-UI live aufgerufen, sobald der Nutzer den Post-Typ wechselt.
+     */
+    public function recommendStatement(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk,blog_post',
+            'funnel' => 'nullable|string|in:ToFu,MoFu,BoFu',
+            'icp' => 'nullable|string',
+            'angle' => 'nullable|string',
+        ]);
+
+        $rec = $this->rulesService->recommendStatementType(
+            $validated['format'],
+            $validated['funnel'] ?? null,
+            $validated['icp'] ?? null,
+            $validated['angle'] ?? '',
+        );
+
+        return response()->json([
+            'statement_type' => $rec['type'],
+            'reason' => $rec['reason'],
+            'hint' => $this->rulesService->statementTypeHint($rec['type']),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = ContentItem::with(['strategy', 'angle', 'media']);
@@ -108,6 +135,7 @@ class ContentController extends Controller
             'kpis' => 'nullable|string',
             'cta' => 'nullable|string',
             'strategy' => 'nullable|string|exists:strategies,key',
+            'statement_type' => 'nullable|string|in:Direkt,Drastisch,Bedrohlich,Gain,Mechanismus,Vision,Sarkastisch',
             // NEU: Varianten-Generierung (A/B-fähig)
             'variants_count' => 'sometimes|integer|min:1|max:5',
             'variant_patterns' => 'sometimes|array',
@@ -116,6 +144,19 @@ class ContentController extends Controller
 
         $angle = Angle::with('strategy')->findOrFail($validated['angle_id']);
         $strategy = $angle->strategy;
+
+        // Statement-Typ: explizit übergeben > Empfehlung aus Format/Funnel/Text.
+        $statementType = $validated['statement_type'] ?? null;
+        if (! $statementType) {
+            $statementType = $this->rulesService->recommendStatementType(
+                $validated['format'],
+                $angle->funnel,
+                $angle->icp,
+                $angle->angle,
+            )['type'];
+        }
+        $validated['statement_type'] = $statementType;
+        $validated['statement_type_hint'] = $this->rulesService->statementTypeHint($statementType);
 
         // Get strategy context
         $strategyCtx = [];
@@ -192,6 +233,13 @@ class ContentController extends Controller
             'variant_group_id' => $groupId,
             'tone_violations'  => $violations,
             'missing_cta'      => $missingCta,
+            'statement_type'   => $statementType,
+            'statement_type_reason' => $this->rulesService->recommendStatementType(
+                $validated['format'],
+                $angle->funnel,
+                $angle->icp,
+                $angle->angle,
+            )['reason'],
         ];
         if (count($items) === 1) {
             $response['content_item'] = $items[0]->load(['strategy', 'angle', 'media']);
@@ -261,6 +309,79 @@ class ContentController extends Controller
         $contentItem->update($validated);
 
         return response()->json($contentItem->load(['strategy', 'angle', 'media']));
+    }
+
+    /**
+     * Assistant-Edit: überarbeitet den Content eines Items anhand einer
+     * freitextlichen Anweisung (LLM) und speichert die neue Version.
+     */
+    public function assistantEdit(Request $request, ContentItem $contentItem): JsonResponse
+    {
+        $validated = $request->validate([
+            'instruction' => 'required|string|max:1000',
+            'apply' => 'sometimes|boolean', // true = sofort speichern, false = nur Vorschlag
+        ]);
+
+        $edenaiKey = \App\Models\Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
+        if (! $edenaiKey) {
+            return response()->json(['error' => 'EdenAI Key nicht konfiguriert.'], 422);
+        }
+
+        $strategy = $contentItem->strategy;
+
+        $prompt = "Überarbeite folgenden Content-Post im Format \"{$contentItem->format}\".\n\n"
+            . "AKTUELLER CONTENT:\n```\n{$contentItem->content}\n```\n\n"
+            . "ANWEISUNG DES NUTZERS:\n{$validated['instruction']}\n\n"
+            . "Behalte Format, Länge und Stil bei. Gib NUR den fertigen überarbeiteten Text aus "
+            . "(keine Erklärungen, keine Meta-Kommentare).";
+
+        $start = microtime(true);
+        try {
+            $response = \Illuminate\Support\Facades\Http::withHeaders([
+                'Authorization' => 'Bearer ' . $edenaiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout(90)->post('https://api.edenai.run/v3/chat/completions', [
+                'model' => 'openai/gpt-4o',
+                'messages' => [
+                    ['role' => 'system', 'content' => 'Du bist ein B2B-Content-Redakteur.'],
+                    ['role' => 'user', 'content' => $prompt],
+                ],
+                'temperature' => 0.6,
+                'max_tokens' => 1500,
+            ]);
+
+            $text = $response->json('choices.0.message.content');
+
+            \App\Models\AgentLog::create([
+                'agent'       => 'assistant',
+                'provider'    => 'edenai/openai',
+                'model'       => 'openai/gpt-4o',
+                'input'       => substr($validated['instruction'], 0, 2000),
+                'output'      => substr($text ?? '', 0, 2000),
+                'status'      => $text ? 'success' : 'error',
+                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
+            ]);
+
+            if (! $text || strlen(trim($text)) < 20) {
+                return response()->json(['error' => 'Keine brauchbare Antwort vom Modell.'], 502);
+            }
+
+            $text = trim($text);
+
+            $applied = false;
+            if ($validated['apply'] ?? true) {
+                $contentItem->update(['content' => $text, 'status' => 'review']);
+                $applied = true;
+            }
+
+            return response()->json([
+                'content_item' => $contentItem->fresh()->load(['strategy', 'angle', 'media']),
+                'suggested' => $text,
+                'applied' => $applied,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
     }
 
     /**
@@ -442,6 +563,9 @@ class ContentController extends Controller
             if (!empty($params[$k])) {
                 $lines[] = strtoupper($k) . " (vorgegeben): {$params[$k]}";
             }
+        }
+        if (!empty($params['statement_type_hint'])) {
+            $lines[] = "STATEMENT-TYP ({$params['statement_type']}): {$params['statement_type_hint']}";
         }
         if ($template) {
             $lines[] = "PATTERN: {$template['label']} — {$template['beschreibung']}";
