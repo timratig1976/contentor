@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({ settings: Object });
 
@@ -30,7 +30,22 @@ function saveMessages() {
 onMounted(() => {
     // Nach Neuladen: Assistant hat Kontext via localStorage
     scrollToBottom();
+    // Externer Öffnen-Trigger (z. B. Quick Input "Verbessern")
+    window.addEventListener('assistant:open', onAssistantOpen);
 });
+
+onUnmounted(() => {
+    window.removeEventListener('assistant:open', onAssistantOpen);
+});
+
+function onAssistantOpen(e) {
+    isOpen.value = true;
+    const prompt = e.detail?.prompt;
+    if (prompt) {
+        input.value = prompt;
+    }
+    scrollToBottom();
+}
 
 const hasEdenAI = computed(() => !!props.settings?.llm_keys?.edenai_key);
 

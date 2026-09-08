@@ -29,6 +29,11 @@ class Angle extends Model
         'similarity_score' => 'float',
     ];
 
+    protected $appends = [
+        'icp_name',
+        'score_color',
+    ];
+
     public function strategy(): BelongsTo
     {
         return $this->belongsTo(Strategy::class, 'strategy_id');
@@ -108,6 +113,20 @@ class Angle extends Model
         if ($this->ranking_score >= 10) return '🟢';
         if ($this->ranking_score >= 7) return '🟡';
         return '🔴';
+    }
+
+    /**
+     * Menschenlesbarer ICP-Name (z. B. "B2B-1" -> "CRM-Entscheider Mittelstand").
+     * Benutzerdefinierte ICP-Definitionen (z. B. B2B-4, B2B-5) werden
+     * controller-seitig ergänzt, um N+1-Queries zu vermeiden.
+     */
+    public function getIcpNameAttribute(): string
+    {
+        if (empty($this->icp)) {
+            return '';
+        }
+
+        return config('contentor.icp_labels.' . $this->icp, $this->icp);
     }
 
     protected static function boot(): void

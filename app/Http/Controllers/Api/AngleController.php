@@ -7,14 +7,17 @@ use App\Models\Angle;
 use App\Models\Strategy;
 use App\Services\ContentRulesService;
 use App\Services\EmbeddingService;
+use App\Services\QuickInputAgentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class AngleController extends Controller
 {
     public function __construct(
         private ContentRulesService $rulesService,
         private EmbeddingService $embeddingService,
+        private QuickInputAgentService $agentService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -64,35 +67,109 @@ class AngleController extends Controller
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
+        $angle = $this->persistAngle($strategy, $validated);
 
-        // Auto-detect ICP and pain cluster if not provided
-        $icp = $validated['icp'] ?? $this->rulesService->guessIcp($validated['angle'], null, $strategy);
-        $painCluster = $validated['pain_cluster'] ?? null;
+        return response()->json($angle->load(['strategy', 'source']), 201);
+    }
 
-        if (!$painCluster) {
-            $cluster = $this->rulesService->pickPainCluster($validated['angle'], $strategy);
+    /**
+     * Batch-Zulassung (Quick Input): selektierte Draft-Angles erst hier
+     * in die angles-Tabelle schreiben — nach User-Approval.
+     */
+    public function storeBatch(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'strategy' => 'required|string|exists:strategies,key',
+            'source_id' => 'nullable|string|exists:sources,id',
+            'batch_key' => 'nullable|string',
+            'angles' => 'required|array|min:1',
+            'angles.*.angle' => 'required|string',
+            'angles.*.icp' => 'nullable|string',
+            'angles.*.pain_cluster' => 'nullable|string',
+            'angles.*.statement_type' => 'nullable|string',
+            'angles.*.funnel' => 'nullable|in:ToFu,MoFu,BoFu',
+        ]);
+
+        $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
+
+        $created = [];
+        foreach ($validated['angles'] as $data) {
+            $data['source_id'] = $data['source_id'] ?? $validated['source_id'] ?? null;
+            $data['batch_key'] = $data['batch_key'] ?? $validated['batch_key'] ?? null;
+            $created[] = $this->persistAngle($strategy, $data);
+        }
+
+        return response()->json([
+            'created' => count($created),
+            'angles' => $created,
+        ], 201);
+    }
+
+    /**
+     * Erzeugt einen Angle (inkl. ICP/Cluster-Ableitung, Funnel-Auflösung,
+     * LLM-Scoring, Auto-Approve und Embedding/Duplikat-Check).
+     */
+    private function persistAngle(Strategy $strategy, array $data): Angle
+    {
+        $icp = $data['icp'] ?? $this->rulesService->guessIcp($data['angle'], null, $strategy);
+        $painCluster = $data['pain_cluster'] ?? null;
+
+        if (! $painCluster) {
+            $cluster = $this->rulesService->pickPainCluster($data['angle'], $strategy);
             $painCluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
         }
 
-        $statementType = $validated['statement_type']
-            ?? $this->rulesService->pickStatementType(null, null, $validated['angle']);
+        $statementType = $data['statement_type']
+            ?? $this->rulesService->pickStatementType(null, null, $data['angle']);
+
+        // Funnel: explizit übergeben > default_funnel des ICPs (aus icp_definitions)
+        $funnel = $data['funnel']
+            ?? $this->rulesService->resolveIcpFunnel($strategy, $icp);
 
         $angle = Angle::create([
             'strategy_id' => $strategy->id,
-            'source_id' => $validated['source_id'] ?? null,
-            'batch_key' => $validated['batch_key'] ?? null,
-            'angle' => $validated['angle'],
+            'source_id' => $data['source_id'] ?? null,
+            'batch_key' => $data['batch_key'] ?? null,
+            'angle' => $data['angle'],
             'icp' => $icp,
             'pain_cluster' => $painCluster,
             'statement_type' => $statementType,
-            'funnel' => $validated['funnel'] ?? null,
-            'viscale_phase' => $validated['viscale_phase'] ?? null,
+            'funnel' => $funnel,
+            'viscale_phase' => $data['viscale_phase'] ?? null,
         ]);
+
+        // Automatisches LLM-Scoring + Auto-Approve.
+        try {
+            $score = $this->agentService->scoreAngle($angle->angle, $strategy, $icp, $painCluster);
+            if ($score) {
+                $angle->updateQuietly([
+                    'r_zielgruppe'    => $score['r_zielgruppe'],
+                    'r_viscale_fit'   => $score['r_viscale_fit'],
+                    'r_schaerfe'      => $score['r_schaerfe'],
+                    'r_timing'        => $score['r_timing'],
+                    'score_reasoning' => $score['score_reasoning'] ?? null,
+                ]);
+
+                if (empty($score['icp_valid'])) {
+                    $angle->icp = $this->rulesService->guessIcp($angle->angle, null, $strategy);
+                }
+                if (empty($score['cluster_valid'])) {
+                    $cluster = $this->rulesService->pickPainCluster($angle->angle, $strategy);
+                    $angle->pain_cluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
+                }
+                $angle->saveQuietly();
+
+                $angle->updateRanking();
+                $angle->refresh();
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Scoring für Angle {$angle->id} fehlgeschlagen: {$e->getMessage()}");
+        }
 
         // Embedding + Duplikat-Check
         $this->attachEmbeddingAndCheckDuplicate($angle);
 
-        return response()->json($angle->load(['strategy', 'source']), 201);
+        return $angle->fresh();
     }
 
     /**
@@ -151,6 +228,23 @@ class AngleController extends Controller
         }
 
         return response()->json($angle->load(['strategy', 'source']));
+    }
+
+    public function destroy(Request $request, Angle $angle): JsonResponse
+    {
+        // Nur Angles löschen, zu denen noch KEIN Content produziert wurde.
+        if ($angle->contentItems()->exists()) {
+            return response()->json([
+                'message' => 'Angle kann nicht gelöscht werden: Es existiert bereits Content.',
+            ], 422);
+        }
+
+        $angle->delete();
+
+        return response()->json([
+            'deleted' => true,
+            'message' => 'Angle gelöscht.',
+        ]);
     }
 
     public function batchRanking(Request $request, string $batchKey): JsonResponse

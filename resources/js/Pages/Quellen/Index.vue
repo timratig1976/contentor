@@ -115,20 +115,22 @@ function fmtDate(d) { return d ? new Date(d).toLocaleString('de-DE', { day: '2-d
                             <span class="text-sm font-bold text-gray-800">{{ s.angles?.length || 0 }}</span>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ s.batch_key || '—' }}</td>
-                        <td class="px-6 py-4 text-sm text-gray-400">{{ s.unit?.name }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-400">{{ s.strategy?.name || '—' }}</td>
                         <td class="px-6 py-4">
                             <div v-if="s.monitor" class="flex items-center gap-2">
-                                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                <span class="text-xs text-green-700">{{ s.frequency }}</span>
-                                <span class="text-xs text-gray-400" title="Zuletzt geprüft">{{ fmtDate(s.last_checked_at) }}</span>
+                                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-full">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                                    Auto-Scrape · {{ s.frequency }}
+                                </span>
+                                <span class="text-xs text-gray-400" :title="'Zuletzt geprüft'">{{ fmtDate(s.last_checked_at) }}</span>
                                 <button @click="toggleMonitoring(s)" class="text-xs text-gray-400 hover:text-red-500" title="Monitoring stoppen">✕</button>
                             </div>
-                            <button v-else-if="s.url" @click="toggleMonitoring(s)"
-                                class="text-xs px-2 py-1 rounded-full border border-gray-200 text-gray-500 hover:border-green-300 hover:text-green-600 transition-colors">
-                                + Überwachen
-                            </button>
-                            <a v-else href="javascript:void(0)" @click="openMonitoring(s)"
-                                class="text-xs text-gray-400 hover:text-green-600">URL + Überwachen</a>
+                            <span v-else-if="s.url" class="inline-flex items-center gap-1.5 text-xs text-gray-500 border border-gray-200 px-2 py-1 rounded-full">
+                                <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>
+                                Kein Auto-Scrape
+                                <button @click="toggleMonitoring(s)" class="text-gray-400 hover:text-green-600" title="Monitoring starten">▶</button>
+                            </span>
+                            <button v-else @click="openMonitoring(s)" class="text-xs text-gray-400 hover:text-green-600" title="URL ergänzen & überwachen">URL + Überwachen</button>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ new Date(s.created_at).toLocaleDateString('de-DE') }}</td>
                     </tr>

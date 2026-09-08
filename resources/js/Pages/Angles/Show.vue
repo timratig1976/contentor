@@ -20,6 +20,31 @@ const generating = ref(false);
 const generateResult = ref(null);
 const selectedTemplates = ref([]);
 
+const statusLabels = {
+    neu: 'Neu',
+    bewertet: 'Bewertet',
+    approved: 'approved',
+    verworfen: 'Verworfen',
+};
+
+const statusClasses = {
+    neu: 'bg-gray-100 text-gray-600',
+    bewertet: 'bg-blue-50 text-blue-600',
+    approved: 'bg-green-50 text-green-700',
+    verworfen: 'bg-red-50 text-red-700',
+};
+
+const status = ref(props.angle.status);
+const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
+
+async function setStatus() {
+    if (status.value === props.angle.status) return;
+    await router.patch(`/api/angles/${props.angle.id}`, { status: status.value }, {
+        preserveState: true,
+        onSuccess: () => { props.angle.status = status.value; },
+    });
+}
+
 function updateRanking() {
     saving.value = true;
     router.patch(`/api/angles/${props.angle.id}`, rankings.value, {
@@ -96,9 +121,16 @@ async function generateVariants() {
                     <div class="flex items-start justify-between mb-4">
                         <div>
                             <h2 class="text-xl font-bold text-gray-800">{{ angle.id }}</h2>
-                            <p class="text-sm text-gray-400 mt-1">{{ angle.unit?.name }} · {{ angle.batch_key || 'Kein Batch' }}</p>
+                            <p class="text-sm text-gray-400 mt-1">{{ angle.strategy?.name || '—' }} · {{ angle.batch_key || 'Kein Batch' }}</p>
                         </div>
-                        <span class="text-xs px-3 py-1 rounded-full bg-neu/20 text-gray-400">{{ angle.status }}</span>
+                        <select
+                            v-model="status"
+                            @change="setStatus"
+                            class="text-xs px-3 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                            :class="statusClasses[status] || 'bg-gray-100 text-gray-600'"
+                        >
+                            <option v-for="opt in statusOptions" :key="opt" :value="opt">{{ statusLabels[opt] || opt }}</option>
+                        </select>
                     </div>
 
                     <div class="prose prose-invert max-w-none">
@@ -108,7 +140,10 @@ async function generateVariants() {
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                         <div>
                             <div class="text-xs text-gray-400 uppercase">ICP</div>
-                            <div class="text-sm text-gray-800 mt-1">{{ angle.icp || '—' }}</div>
+                            <div class="text-sm text-gray-800 mt-1">
+                                <span class="font-semibold">{{ angle.icp || '—' }}</span>
+                                <span v-if="angle.icp_name && angle.icp_name !== angle.icp" class="text-gray-500"> · {{ angle.icp_name }}</span>
+                            </div>
                         </div>
                         <div>
                             <div class="text-xs text-gray-400 uppercase">Pain Cluster</div>

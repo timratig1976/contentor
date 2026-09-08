@@ -84,6 +84,7 @@ class SourceMonitorService
             'last_checked_at' => now(),
             'content_hash' => $hash,
             'last_content_preview' => mb_substr($content, 0, 480),
+            'raw_content' => $content,
         ]);
 
         if (! $changed) {

@@ -27,8 +27,10 @@ Route::get('/sources/{source}/angles', [SourceController::class, 'angles']);
 
 // Angles
 Route::post('/angles', [AngleController::class, 'store']);
+Route::post('/angles/batch', [AngleController::class, 'storeBatch']);
 Route::get('/angles', [AngleController::class, 'index']);
 Route::patch('/angles/{angle}', [AngleController::class, 'update']);
+Route::delete('/angles/{angle}', [AngleController::class, 'destroy']);
 Route::get('/angles/batch/{batchKey}', [AngleController::class, 'batchRanking']);
 
 // Content

@@ -32,6 +32,32 @@ function scoreColor(score) {
     if (score >= 7) return 'text-yellow-600';
     return 'text-red-600';
 }
+
+const statusLabels = {
+    neu: 'Neu',
+    bewertet: 'Bewertet',
+    approved: 'approved',
+    verworfen: 'Verworfen',
+};
+
+const statusClasses = {
+    neu: 'bg-gray-100 text-gray-600',
+    bewertet: 'bg-blue-50 text-blue-600',
+    approved: 'bg-green-50 text-green-700',
+    verworfen: 'bg-red-50 text-red-700',
+};
+
+async function del(angle) {
+    if (!confirm('Angle wirklich löschen?')) return;
+    await router.delete(`/api/angles/${angle.id}`, { preserveState: true });
+}
+
+const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
+
+async function setStatus(angle, status) {
+    if (status === angle.status) return;
+    await router.patch(`/api/angles/${angle.id}`, { status }, { preserveState: true });
+}
 </script>
 
 <template>
@@ -90,7 +116,8 @@ function scoreColor(score) {
                         <th class="text-center px-6 py-3 text-xs font-medium text-gray-400 uppercase">Rang</th>
                         <th class="text-center px-6 py-3 text-xs font-medium text-gray-400 uppercase">Duplikat</th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Status</th>
-                        <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Unit</th>
+                        <th class="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Strategie</th>
+                        <th class="text-right px-6 py-3 text-xs font-medium text-gray-400 uppercase"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-800">
@@ -99,7 +126,10 @@ function scoreColor(score) {
                             <p class="text-sm text-gray-800 line-clamp-2 max-w-md">{{ angle.angle }}</p>
                         </td>
                         <td class="px-6 py-4">
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-neu/20 text-gray-400">{{ angle.icp }}</span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-neu/20 text-gray-600">{{ angle.icp }}</span>
+                                <span v-if="angle.icp_name && angle.icp_name !== angle.icp" class="text-xs text-gray-500">{{ angle.icp_name }}</span>
+                            </div>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ angle.pain_cluster }}</td>
                         <td class="px-6 py-4 text-sm text-gray-400">{{ angle.funnel || '—' }}</td>
@@ -115,17 +145,26 @@ function scoreColor(score) {
                             </span>
                             <span v-else class="text-gray-300">—</span>
                         </td>
-                        <td class="px-6 py-4">
-                            <span class="text-xs px-2 py-1 rounded-full"
-                                :class="{
-                                    'bg-neu text-gray-400': angle.status === 'neu',
-                                    'bg-blue-50 text-blue-600': angle.status === 'bewertet',
-                                    'bg-green-50 text-green-700': angle.status === 'approved',
-                                    'bg-red-50 text-red-700': angle.status === 'verworfen',
-                                }"
-                            >{{ angle.status }}</span>
+                        <td class="px-6 py-4" @click.stop>
+                            <select
+                                v-model="angle.status"
+                                @change="setStatus(angle, angle.status)"
+                                class="text-xs px-2 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                                :class="statusClasses[angle.status] || 'bg-gray-100 text-gray-600'"
+                            >
+                                <option v-for="opt in statusOptions" :key="opt" :value="opt">{{ statusLabels[opt] || opt }}</option>
+                            </select>
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-400">{{ angle.unit?.name }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-400">{{ angle.strategy?.name || '—' }}</td>
+                        <td class="px-6 py-4 text-right" @click.stop>
+                            <button
+                                v-if="!angle.content_items_count"
+                                @click="del(angle)"
+                                class="text-xs text-red-500 hover:text-red-700"
+                                title="Angle löschen"
+                            >🗑️</button>
+                            <span v-else class="text-xs text-gray-300" title="Content vorhanden">🔒</span>
+                        </td>
                     </tr>
                 </tbody>
             </table>

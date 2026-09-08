@@ -15,6 +15,7 @@ class Source extends Model
         'id', 'strategy_id', 'title', 'type', 'visibility',
         'file_ref', 'batch_key', 'url', 'monitor', 'frequency',
         'last_checked_at', 'content_hash', 'last_content_preview',
+        'raw_content',
     ];
 
     protected $casts = [

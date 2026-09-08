@@ -42,15 +42,8 @@ class QuickInputController extends Controller
             'batch_key' => 'nullable|string',
             'create_angles' => 'boolean',
             'num_angles' => 'nullable|integer|min:1|max:10',
-        ]);
-        $validated = $request->validate([
-            'content' => 'required|string|min:10',
-            'title' => 'nullable|string|max:255',
-            'strategy' => 'required|string|exists:strategies,key',
-            'type' => 'nullable|string|in:auto,blog,linkedin,url,interview,note,quote',
-            'batch_key' => 'nullable|string',
-            'create_angles' => 'boolean',
-            'num_angles' => 'nullable|integer|min:1|max:10',
+            'monitor' => 'nullable|boolean',
+            'frequency' => 'nullable|in:daily,weekly,biweekly',
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
@@ -90,19 +83,26 @@ class QuickInputController extends Controller
             'visibility' => 'intern',
             'batch_key' => $validated['batch_key'] ?? 'quick-' . now()->format('Ymd'),
             'file_ref' => $scrapedUrl ?? null,
+            'url' => $scrapedUrl,
+            'monitor' => $scrapedUrl ? (bool) ($validated['monitor'] ?? false) : false,
+            'frequency' => $validated['frequency'] ?? 'weekly',
+            'raw_content' => $content,
         ]);
 
         $result = [
             'source' => $source->load('strategy'),
-            'angles' => [],
+            'drafts' => [],
             'scraped' => $scrapedUrl !== null,
             'content_length' => mb_strlen($content),
         ];
 
-        // Optionally create angles
+        // Extract DRAFT angles (not persisted yet — approval happens client-side)
         if ($validated['create_angles'] ?? true) {
-            $angles = $this->extractAngles($content, $strategy, $source);
-            $result['angles'] = $angles;
+            $result['drafts'] = $this->extractDraftAngles($content, $strategy, (int) ($validated['num_angles'] ?? 5));
+        }
+
+        if (($validated['monitor'] ?? false) && $scrapedUrl) {
+            app(\App\Services\SourceMonitorService::class)->checkSource($source->fresh());
         }
 
         if ($request->header('X-Inertia')) {
@@ -113,7 +113,7 @@ class QuickInputController extends Controller
     }
 
     /**
-     * Handle PDF file upload — extract text and process.
+     * Handle PDF file upload — extract text and process (drafts, keine Persistierung).
      */
     private function storeFromFile(Request $request)
     {
@@ -123,6 +123,7 @@ class QuickInputController extends Controller
             'strategy' => 'required|string|exists:strategies,key',
             'batch_key' => 'nullable|string',
             'create_angles' => 'boolean',
+            'num_angles' => 'nullable|integer|min:1|max:10',
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
@@ -152,13 +153,13 @@ class QuickInputController extends Controller
             'visibility' => 'intern',
             'file_ref' => $file->getClientOriginalName(),
             'batch_key' => $validated['batch_key'] ?? 'pdf-' . now()->format('Ymd'),
+            'raw_content' => $content,
         ]);
 
-        $result = ['source' => $source->load('strategy'), 'angles' => []];
+        $result = ['source' => $source->load('strategy'), 'drafts' => []];
 
         if ($validated['create_angles'] ?? true) {
-            $angles = $this->extractAngles($content, $strategy, $source);
-            $result['angles'] = $angles;
+            $result['drafts'] = $this->extractDraftAngles($content, $strategy, (int) ($validated['num_angles'] ?? 5));
         }
 
         if ($request->header('X-Inertia')) {
@@ -240,21 +241,24 @@ class QuickInputController extends Controller
         return trim($content);
     }
 
-    private function extractAngles(string $content, Strategy $strategy, Source $source): array
+    /**
+     * Extrahiert DRAFT-Angles aus dem Inhalt (LLM + Regex-Fallback).
+     * Gibt reine Daten-Arrays zurück — KEINE Persistierung.
+     * Persistierung erfolgt erst nach User-Approval via /api/angles/batch.
+     */
+    private function extractDraftAngles(string $content, Strategy $strategy, int $max = 5): array
     {
-        $angles = [];
-
-        // Inhalt bereinigen, dann LLM-extraktion
         $cleanContent = $this->cleanScrapedContent($content);
-        $result = $this->agentService->extractAngles($cleanContent, $strategy, 5);
+        $result = $this->agentService->extractAngles($cleanContent, $strategy, $max);
 
-        if ($result['error']) {
+        if (! empty($result['error'])) {
             Log::warning("QuickInput LLM fehlgeschlagen: {$result['error']} — Fallback auf Regex-Extraktion.");
-            return $this->extractAnglesFallback($cleanContent, $strategy, $source);
+            return $this->extractDraftAnglesFallback($cleanContent, $strategy, $max);
         }
 
+        $drafts = [];
+
         foreach ($result['angles'] as $item) {
-            // ICP/Cluster: LLM-Vorschlag primär, Regex-Fallback vom Angle-Text
             $icp = $item['icp'] ?: $this->rulesService->guessIcp($item['angle'], null, $strategy);
             $cluster = null;
             if ($item['pain_cluster']) {
@@ -262,119 +266,49 @@ class QuickInputController extends Controller
                     if ($c['code'] === $item['pain_cluster']) { $cluster = $c; break; }
                 }
             }
-            if (!$cluster) {
+            if (! $cluster) {
                 $cluster = $this->rulesService->pickPainCluster($item['angle'], $strategy);
             }
             $painCluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
             $statementType = $item['statement_type'] ?: $this->rulesService->pickStatementType(null, null, $item['angle']);
 
-            $angle = Angle::create([
-                'angle' => $item['angle'],
-                'strategy_id' => $strategy->id,
-                'source_id' => $source->id,
-                'batch_key' => $source->batch_key,
-                'icp' => $icp,
-                'pain_cluster' => $painCluster,
+            $drafts[] = [
+                'angle'          => $item['angle'],
+                'icp'            => $icp,
+                'pain_cluster'   => $painCluster,
                 'statement_type' => $statementType,
-            ]);
-            $angles[] = $angle;
-
-            // LLM-Scoring: Angle bewerten + Ranking setzen + ICP/Cluster validieren
-            try {
-                $score = $this->agentService->scoreAngle($angle->angle, $strategy, $icp, $painCluster);
-                if ($score) {
-                    $angle->updateQuietly([
-                        'r_zielgruppe' => $score['r_zielgruppe'],
-                        'r_viscale_fit' => $score['r_viscale_fit'],
-                        'r_schaerfe' => $score['r_schaerfe'],
-                        'r_timing' => $score['r_timing'],
-                    ]);
-
-                    // ICP/Cluster vom LLM validieren lassen -> bei Invalid Regex-Fallback pro Angle
-                    $needsUpdate = false;
-                    if (!$score['icp_valid']) {
-                        $angle->icp = $this->rulesService->guessIcp($angle->angle, null, $strategy);
-                        $needsUpdate = true;
-                    }
-                    if (!$score['cluster_valid']) {
-                        $cluster = $this->rulesService->pickPainCluster($angle->angle, $strategy);
-                        $angle->pain_cluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
-                        $needsUpdate = true;
-                    }
-                    if ($needsUpdate) {
-                        $angle->saveQuietly();
-                    }
-
-                    $angle->updateRanking();
-                    $angle->refresh();
-                }
-            } catch (\Throwable $e) {
-                Log::warning("Score für Angle {$angle->id} fehlgeschlagen: {$e->getMessage()}");
-            }
-
-            // Embedding + Duplikat-Check (bestehende Infrastruktur)
-            try {
-                $embeddingService = app(\App\Services\EmbeddingService::class);
-                $vector = $embeddingService->embed($angle->angle);
-                if ($vector) {
-                    \DB::statement("UPDATE angles SET embedding = ?::vector WHERE id = ?", [
-                        '[' . implode(',', $vector) . ']', $angle->id,
-                    ]);
-                    $similar = $embeddingService->findMostSimilar($vector, $strategy->id, $angle->id);
-                    if ($similar) {
-                        $angle->updateQuietly([
-                            'duplicate_of_id' => $similar['id'],
-                            'similarity_score' => $similar['similarity'],
-                        ]);
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Embedding ist optional — kein Grund abzubrechen
-            }
+            ];
         }
 
-        return $angles;
+        return $drafts;
     }
 
     /**
-     * Fallback: Regex-basierte Extraktion, falls LLM nicht verfügbar.
+     * Fallback: Regex-basierte DRAFT-Extraktion, falls LLM nicht verfügbar.
      */
-    private function extractAnglesFallback(string $content, Strategy $strategy, Source $source): array
+    private function extractDraftAnglesFallback(string $content, Strategy $strategy, int $max = 5): array
     {
-        $angles = [];
-
-        // Inhalt erst bereinigen
         $cleanContent = $this->cleanScrapedContent($content);
 
-        // Sätze splitten
         $sentences = preg_split('/(?<=[.!?])\s+/', $cleanContent, -1, PREG_SPLIT_NO_EMPTY);
 
         $scored = [];
         foreach ($sentences as $sentence) {
             $sentence = trim($sentence);
 
-            // Qualitätsfilter: Satz muss echten Inhalt haben
-            // Zu kurz/lang → überspringen
             $len = mb_strlen($sentence);
             if ($len < 25 || $len > 220) continue;
-            // Immer noch URL-Reste → überspringen
             if (preg_match('/https?:|www\.|\.png|\.jpg|\.svg|\.jpeg/i', $sentence)) continue;
-            // Reine Navigations-/UI-Texte → überspringen
             if (preg_match('/^(Menü|Navigation|Cookie|Impressum|Datenschutz|Kontakt|Home|Newsletter abonnieren|Jetzt buchen)/i', $sentence)) continue;
-            // Muss mindestens 4 echte Wörter enthalten
             if (str_word_count($sentence) < 4) continue;
 
             $score = 0;
             $lower = mb_strtolower($sentence);
 
-            // Meinungsstarke / provokante Aussagen
             if (preg_match('/ist|sind|sollte|müssen|kann nicht|ohne|nie|immer|falsch|richtig|problem|lösung|fehler|scheitern|versagen/i', $sentence)) $score += 2;
             if (preg_match('/die meisten|alle|niemand|jeder|kein einziger|zu viele/i', $lower)) $score += 2;
-            // Metriken = sehr wertvoll
             if (preg_match('/\d+\s*%|\d+x|\d+\s*(€|\$|prozent|fach|mal|stunden|tage|monate)/i', $sentence)) $score += 3;
-            // Kontrastierende Aussagen (aber/statt/obwohl)
             if (preg_match('/\b(aber|statt|obwohl|trotzdem|während|anstatt|nicht.*sondern)\b/i', $sentence)) $score += 2;
-            // Optimale Länge für einen Angle
             if ($len >= 40 && $len <= 150) $score += 1;
 
             if ($score >= 3) {
@@ -383,61 +317,52 @@ class QuickInputController extends Controller
         }
 
         usort($scored, fn ($a, $b) => $b['score'] - $a['score']);
-        // Deduplizieren: sehr ähnliche Sätze (erste 40 Zeichen) nur einmal
+
         $seen = [];
         $top = [];
         foreach ($scored as $item) {
             $key = mb_substr($item['text'], 0, 40);
-            if (!in_array($key, $seen)) {
+            if (! in_array($key, $seen)) {
                 $seen[] = $key;
                 $top[] = $item;
             }
-            if (count($top) >= 5) break;
+            if (count($top) >= $max) break;
         }
 
+        $drafts = [];
         foreach ($top as $item) {
             $icp = $this->rulesService->guessIcp($cleanContent, null, $strategy);
             $cluster = $this->rulesService->pickPainCluster($cleanContent, $strategy);
             $statementType = $this->rulesService->pickStatementType(null, 'text', $item['text']);
 
-            // Inline-Zeilenumbrüche + übrige Sonderzeichen-Präfixe aus dem Angle-Text entfernen
             $angleText = trim(preg_replace('/[\r\n\t]+/', ' ', $item['text']));
             $angleText = preg_replace('/\s{2,}/', ' ', $angleText);
-            // Überschrift-Präfixe strippen: "HEBEL 03 ...", "Marketing ..." o.ä.
             $angleText = preg_replace('/^HEBEL\s*\d+\s*/i', '', $angleText);
             $angleText = preg_replace('/^(?:[A-ZÄÖÜ0-9&\s\-–—·:]{2,25})\s+(?=[A-ZÄÖÜa-zäöü])/', '', $angleText);
             $angleText = preg_replace('/^[\s→✓•·▸\-–—]+/', '', $angleText);
             $angleText = trim($angleText);
 
-            $angle = Angle::create([
-                'angle' => $angleText,
-                'strategy_id' => $strategy->id,
-                'source_id' => $source->id,
-                'batch_key' => $source->batch_key,
-                'icp' => $icp,
-                'pain_cluster' => $cluster ? "{$cluster['code']} · {$cluster['name']}" : null,
+            if ($angleText === '') continue;
+
+            $drafts[] = [
+                'angle'          => $angleText,
+                'icp'            => $icp,
+                'pain_cluster'   => $cluster ? "{$cluster['code']} · {$cluster['name']}" : null,
                 'statement_type' => $statementType,
-            ]);
-            $angles[] = $angle;
+            ];
         }
 
-        // Fallback: wenn nach Bereinigung nichts brauchbares übrig
-        if (empty($angles)) {
-            // Ersten sinnvollen Satz (>30 Zeichen, keine URLs) als Angle
+        // Letzter Fallback: wenn nichts brauchbares übrig, ersten sinnvollen Satz.
+        if (empty($drafts)) {
             $fallback = collect(preg_split('/\n/', $cleanContent))
                 ->map(fn ($l) => trim($l))
-                ->first(fn ($l) => mb_strlen($l) > 30 && !preg_match('/https?:|www\./i', $l));
+                ->first(fn ($l) => mb_strlen($l) > 30 && ! preg_match('/https?:|www\./i', $l));
 
             if ($fallback) {
-                $angles[] = Angle::create([
-                    'angle' => mb_substr($fallback, 0, 200),
-                    'strategy_id' => $strategy->id,
-                    'source_id' => $source->id,
-                    'batch_key' => $source->batch_key,
-                ]);
+                $drafts[] = ['angle' => mb_substr($fallback, 0, 200)];
             }
         }
 
-        return $angles;
+        return $drafts;
     }
 }

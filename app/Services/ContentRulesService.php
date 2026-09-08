@@ -88,6 +88,25 @@ class ContentRulesService
     }
 
     /**
+     * Liest den default_funnel eines ICP aus den icp_definitions der Strategie.
+     * Rückgabe null, wenn der ICP nicht definiert ist oder keinen Funnel hat.
+     */
+    public function resolveIcpFunnel(Strategy $strategy, string $icp): ?string
+    {
+        $definitions = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'icp_definitions')
+            ->value('content');
+
+        foreach ($definitions['icps'] ?? [] as $entry) {
+            if (($entry['key'] ?? null) === $icp && ! empty($entry['default_funnel'])) {
+                return $entry['default_funnel'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Build an angle sentence from input + metadata.
      */
     public function buildAngleSentence(string $input, array $painCluster, string $icp, string $statementType): string
