@@ -19,7 +19,7 @@ class ContentStrategy extends Model
     public const KEYS = [
         'brand_voice',
         'channel_rules',
-        'icp_channel_mapping',
+        'icp_definitions',
         'media_logic',
         'editorial_rhythm',
         'content_strategy',
@@ -30,11 +30,11 @@ class ContentStrategy extends Model
     public const LABELS = [
         'brand_voice' => 'Brand Voice',
         'channel_rules' => 'Kanal-Regelwerk',
-        'icp_channel_mapping' => 'ICP → Kanal Mapping',
+        'icp_definitions' => 'ICP-Definitionen',
         'media_logic' => 'Medien-Logik',
         'editorial_rhythm' => 'Redaktions-Rhythmus',
         'content_strategy' => 'Content-Strategie',
-        'post_templates' => 'Post-Patterns (inhaltliche Vorlagen)',
+        'post_templates' => 'Post-Patterns',
         'content_personas' => 'Personen-Posts & Themen',
     ];
 

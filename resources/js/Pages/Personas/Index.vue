@@ -71,6 +71,15 @@ async function deleteExample(id) {
 
 // Beim Öffnen der Bearbeitung Beispiele laden
 function openEditWithExamples(p) { openEdit(p); loadExamples(); }
+
+async function updateExample(ex) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    await fetch(`/api/personas/${editingId.value}/examples/${ex.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        body: JSON.stringify({ why_good: ex.why_good }),
+    });
+}
 </script>
 
 <template>
@@ -78,10 +87,10 @@ function openEditWithExamples(p) { openEdit(p); loadExamples(); }
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Personas</h1>
+        <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">Creator</h1>
         <p class="text-sm text-gray-600 mt-1">Wer postet was, in welchem Ton, zu welchen Themen?</p>
       </div>
-      <button v-if="activeTab==='list'" @click="openNew" class="neu-btn-primary px-4 py-2 text-sm">+ Neue Persona</button>
+      <button v-if="activeTab==='list'" @click="openNew" class="neu-btn-primary px-4 py-2 text-sm">+ Neuer Creator</button>
       <button v-else @click="closeForm" class="text-gray-500 hover:text-gray-900 text-sm">← Zurück zur Liste</button>
     </div>
 
@@ -110,7 +119,7 @@ function openEditWithExamples(p) { openEdit(p); loadExamples(); }
               <td class="px-4 py-3 text-center"><span :class="p.active?'text-green-600':'text-red-500'">{{ p.active?'✓':'✗' }}</span></td>
               <td class="px-4 py-3 text-right" @click.stop><button @click="del(p.id)" class="text-xs text-red-500 hover:text-red-700">🗑️</button></td>
             </tr>
-            <tr v-if="!personas?.length"><td colspan="6" class="px-6 py-12 text-center text-sm text-gray-500">Noch keine Personas. Erstelle hier eine globale Persona und ordne sie Strategien zu.</td></tr>
+            <tr v-if="!personas?.length"><td colspan="6" class="px-6 py-12 text-center text-sm text-gray-500">Noch keine Creator. Erstelle hier einen globalen Creator und ordne ihn Strategien zu.</td></tr>
           </tbody>
         </table>
       </div>
@@ -259,7 +268,7 @@ function openEditWithExamples(p) { openEdit(p); loadExamples(); }
                 <button @click="deleteExample(ex.id)" class="text-red-500 text-xs">Entfernen</button>
               </div>
               <p class="text-sm text-gray-900 whitespace-pre-line">{{ ex.content }}</p>
-              <textarea v-model="ex.why_good" class="mt-2 w-full text-xs border rounded px-2 py-1 text-gray-700" placeholder="Warum ist das ein gutes Beispiel?" @change="fetch(`/api/personas/${editingId}/examples/${ex.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name=\"csrf-token\"]')?.content || '' }, body: JSON.stringify({ why_good: ex.why_good }) })"></textarea>
+              <textarea v-model="ex.why_good" class="mt-2 w-full text-xs border rounded px-2 py-1 text-gray-700" placeholder="Warum ist das ein gutes Beispiel?" @change="updateExample(ex)"></textarea>
             </div>
             <div v-if="!examples.length" class="text-sm text-gray-400 italic">Noch keine Referenz-Posts.</div>
 

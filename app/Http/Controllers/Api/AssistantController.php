@@ -64,7 +64,7 @@ class AssistantController extends Controller
     public function write(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'type' => 'required|string|in:strategy,persona,setting,angle,content',
+            'type' => 'required|string|in:strategy,persona,setting,angle,content,icp_definitions,strategy_content',
             'data' => 'required|array',
         ]);
 
@@ -74,6 +74,8 @@ class AssistantController extends Controller
             'setting' => $this->writeSetting($validated['data']),
             'angle' => $this->writeAngle($validated['data']),
             'content' => $this->writeContent($validated['data']),
+            'icp_definitions' => $this->writeIcpDefinitions($validated['data']),
+            'strategy_content' => $this->writeStrategyContent($validated['data']),
         };
 
         return response()->json(['saved' => true, 'result' => $result]);
@@ -158,13 +160,86 @@ class AssistantController extends Controller
         return $content->toArray();
     }
 
+    private function writeIcpDefinitions(array $data): array
+    {
+        $strategy = \App\Models\Strategy::where('key', $data['strategy'])->firstOrFail();
+
+        $newIcps = $data['icps'] ?? [];
+        $defaultIcp = $data['default_icp'] ?? null;
+
+        // Bestehende ICPs laden und mit neuen mergen (Key-basiert)
+        $existing = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'icp_definitions')
+            ->first();
+
+        $existingIcps = $existing && isset($existing->content['icps'])
+            ? $existing->content['icps']
+            : [];
+
+        $byKey = collect($existingIcps)->keyBy('key')->toArray();
+        foreach ($newIcps as $icp) {
+            $byKey[$icp['key']] = $icp;
+        }
+        $mergedIcps = array_values($byKey);
+
+        $mergedDefault = $defaultIcp ?: ($existing->content['default_icp'] ?? 'B2B-1');
+
+        // In ContentStrategy speichern (für UI)
+        \App\Models\ContentStrategy::updateOrCreate(
+            ['strategy_id' => $strategy->id, 'key' => 'icp_definitions'],
+            ['content' => ['icps' => $mergedIcps, 'default_icp' => $mergedDefault], 'version' => 1]
+        );
+
+        // In Strategy.config.rules.icpGuesser speichern (für Backend-Regex)
+        $config = $strategy->config ?? [];
+        $config['rules'] = $config['rules'] ?? [];
+        $config['rules']['icpGuesser'] = array_map(fn ($icp) => [
+            'icp' => $icp['key'],
+            'match' => $icp['match_keywords'] ?? '',
+        ], $mergedIcps);
+        $config['rules']['defaultIcp'] = $mergedDefault;
+        $strategy->config = $config;
+        $strategy->save();
+
+        return ['icps' => $mergedIcps, 'default_icp' => $mergedDefault];
+    }
+
+    /**
+     * Schreibt einen beliebigen ContentStrategy-Block (brand_voice, channel_rules, etc.)
+     * in die Datenbank. Merged mit bestehenden Daten, überschreibt nicht.
+     */
+    private function writeStrategyContent(array $data): array
+    {
+        $strategy = \App\Models\Strategy::where('key', $data['strategy'])->firstOrFail();
+        $key = $data['key'] ?? '';
+        $content = $data['content'] ?? [];
+
+        if (!in_array($key, \App\Models\ContentStrategy::KEYS)) {
+            throw new \InvalidArgumentException("Ungültiger ContentStrategy-Key: {$key}");
+        }
+
+        // Bestehenden Content laden und mergen
+        $existing = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', $key)
+            ->first();
+
+        $merged = $existing ? array_merge($existing->content ?? [], $content) : $content;
+
+        $cs = \App\Models\ContentStrategy::updateOrCreate(
+            ['strategy_id' => $strategy->id, 'key' => $key],
+            ['content' => $merged, 'version' => ($existing?->version ?? 0) + 1]
+        );
+
+        return $cs->toArray();
+    }
+
     private function buildSystemPrompt(): string
     {
         return <<<'PROMPT'
 Du bist ein Content-Strategie-Assistant für das Contentor-System. Du hilfst Nutzern dabei, Content-Strategien zu erstellen, zu verfeinern und zu optimieren.
 
 ## Deine Fähigkeiten:
-1. **Strategie erstellen**: Du kannst komplette Content-Strategien mit Brand Voice, Channel Rules, ICP-Mapping, Content-Pillars und Post-Templates generieren.
+1. **Strategie erstellen**: Du kannst komplette Content-Strategien mit Brand Voice, Channel Rules, ICP-Definitionen, Content-Pillars und Post-Templates generieren.
 2. **Personas erstellen**: Du kannst Content-Personas (Name, Rolle, Voice, Tonalität, Themen, Angles, Channel-Strategien) erstellen. Personas sind GLOBAL — sie gehören zu keiner einzelnen Strategie, sondern werden Strategien separat zugeordnet (type "persona" mit "strategy").
 3. **Settings schreiben**: Du kannst direkt in die Datenbank schreiben — Strategien, Personas, Angles und Settings.
 4. **Fragen beantworten**: Du beantwortest Fragen zu Content-Marketing, B2B-SaaS, LinkedIn-Strategie, etc.
@@ -183,15 +258,60 @@ Wenn der Nutzer eine neue Strategie will:
 - Wenn du etwas nicht weißt, frage nach
 - Antworte auf Deutsch
 
+## Auto-Execution:
+Wenn der Nutzer etwas speichern/erstellen will, antworte mit einem JSON-Codeblock.
+Der Frontend-Assistant erkennt diese Blöcke automatisch und führt sie aus.
+Das System unterstützt folgende Typen: "strategy", "persona", "angle", "content", "setting", "icp_definitions", "strategy_content"
+
+- **strategy_content**: Schreibt einen ContentStrategy-Block (brand_voice, channel_rules, post_templates, media_logic, editorial_rhythm, content_strategy, content_personas). Merged mit bestehenden Daten.
+  ```json
+  { "type": "strategy_content", "data": { "strategy": "viscale", "key": "brand_voice", "content": { "personality": "...", "tone": "direkt", "never": [], "must": [] } } }
+  ```
+
+Beispiel für ICP-Erstellung:
+```json
+{
+  "type": "icp_definitions",
+  "data": {
+    "strategy": "viscale",
+    "default_icp": "B2B-1",
+    "icps": [
+      { "key": "B2B-4", "name": "Startup CTO", "role": "CTO", "description": "...", "pain_points": [], "gains": [], "match_keywords": "cto|startup|scale", "default_funnel": "ToFu", "priority": "medium" }
+    ]
+  }
+}
+```
+
 ## JSON-Format für Strategie:
 {
   "key": "slug",
   "name": "Name",
   "brand_voice": { "personality": "...", "tone": "direkt", "never": [], "must": [] },
   "channel_rules": { "channels": [{ "channel": "linkedin", "frequency": "weekly", "rules": [] }] },
-  "icp_channel_mapping": { "mappings": [{ "icp": "B2B-1", "channels": ["linkedin"], "priority": "high" }] },
   "content_strategy": { "goals": "...", "pillars": [{ "name": "...", "description": "..." }] },
   "post_templates": { "templates": [{ "format": "linkedin_post", "structure": "Hook\nMechanismus\nProof\nCTA" }] }
+}
+
+## JSON-Format für ICP-Definitionen:
+{
+  "type": "icp_definitions",
+  "data": {
+    "strategy": "viscale",
+    "default_icp": "B2B-1",
+    "icps": [
+      {
+        "key": "B2B-1",
+        "name": "CRM-Entscheider Mittelstand",
+        "role": "CEO / Head of Sales",
+        "description": "2-3 Sätze Beschreibung",
+        "pain_points": ["Blindflug im Forecast", "Vertrieb hängt an Einzelpersonen"],
+        "gains": ["Planbares Wachstum", "Echte Forecast-Sicherheit"],
+        "match_keywords": "forecast|pipeline|sales",
+        "default_funnel": "ToFu",
+        "priority": "high"
+      }
+    ]
+  }
 }
 
 ## JSON-Format für Persona (global, separat von der Strategie):

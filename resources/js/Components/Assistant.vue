@@ -1,24 +1,65 @@
 <script setup>
-import { ref, reactive, computed, nextTick } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted } from 'vue';
 
 const props = defineProps({ settings: Object });
+
+const STORAGE_KEY = 'contentor_assistant_messages';
 
 const isOpen = ref(false);
 const loading = ref(false);
 const input = ref('');
-const messages = ref([{ role: 'assistant', text: 'Hallo! Ich bin dein Content-Strategie-Assistant. Ich kann dir helfen, eine komplette Strategie zu erstellen, Personas zu definieren, oder Fragen zu Content-Marketing beantworten. Was möchtest du tun?' }]);
+
+// Messages aus localStorage laden, Fallback auf Begrüßung
+function loadMessages() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) return JSON.parse(saved);
+    } catch {}
+    return [{ role: 'assistant', text: 'Hallo! Ich bin dein Content-Strategie-Assistant. Ich kann dir helfen, ICPs zu definieren, Strategien zu erstellen, Personas anzulegen oder Fragen zu Content-Marketing beantworten. Was möchtest du tun?' }];
+}
+
+const messages = ref(loadMessages());
 const chatContainer = ref(null);
+
+function saveMessages() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.value.slice(-50)));
+    } catch {}
+}
+
+onMounted(() => {
+    // Nach Neuladen: Assistant hat Kontext via localStorage
+    scrollToBottom();
+});
 
 const hasEdenAI = computed(() => !!props.settings?.llm_keys?.edenai_key);
 
-async function send() {
+function scrollToBottom() {
+    nextTick(() => {
+        if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+    });
+}
+
+function addMessage(role, text) {
+    messages.value.push({ role, text });
+    saveMessages();
+    scrollToBottom();
+}
+
+function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+}
+
+async function sendMessage() {
     if (!input.value.trim() || loading.value) return;
     const msg = input.value;
     input.value = '';
     loading.value = true;
 
-    messages.value.push({ role: 'user', text: msg });
-    scrollToBottom();
+    addMessage('user', msg);
 
     try {
         const res = await fetch('/api/assistant/chat', {
@@ -27,53 +68,64 @@ async function send() {
             body: JSON.stringify({ message: msg, history: messages.value.map(m => ({ role: m.role, message: m.text })) }),
         });
         const data = await res.json();
-        messages.value.push({ role: 'assistant', text: data.reply || 'Keine Antwort erhalten.' });
+        const reply = data.reply || 'Keine Antwort erhalten.';
+        addMessage('assistant', reply);
+
+        // Auto-execute: Assistant-Reply nach JSON-Write-Block scannen
+        await autoExecuteWrite(reply);
     } catch (e) {
-        messages.value.push({ role: 'assistant', text: 'Fehler: ' + e.message });
+        addMessage('assistant', 'Fehler: ' + e.message);
     }
     loading.value = false;
-    scrollToBottom();
 }
 
-function scrollToBottom() {
-    nextTick(() => {
-        if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-    });
-}
-
-function handleKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        // Direkt senden, nicht auf await warten
-        sendMessage();
+/**
+ * Scannt die Assistant-Antwort nach JSON-Blöcken mit type/write-Anweisungen
+ * und führt sie automatisch via /api/assistant/write aus.
+ */
+async function autoExecuteWrite(reply) {
+    // JSON-Blöcke extrahieren: ```json ... ``` oder { "type": ... }
+    const blocks = [];
+    const regex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/g;
+    let match;
+    while ((match = regex.exec(reply)) !== null) {
+        try {
+            const parsed = JSON.parse(match[1]);
+            if (parsed && parsed.type) blocks.push(parsed);
+        } catch {}
     }
-}
 
-function sendMessage() {
-    if (!input.value.trim() || loading.value) return;
-    const msg = input.value;
-    input.value = '';
-    loading.value = true;
+    // Auch freistehende JSON-Objekte mit "type" erkennen
+    if (blocks.length === 0) {
+        const looseRegex = /\{[^{}]*"type"\s*:\s*"[^"]+"[^{}]*\}/g;
+        while ((match = looseRegex.exec(reply)) !== null) {
+            try {
+                const parsed = JSON.parse(match[0]);
+                if (parsed && parsed.type) blocks.push(parsed);
+            } catch {}
+        }
+    }
 
-    messages.value.push({ role: 'user', text: msg });
-    scrollToBottom();
-
-    fetch('/api/assistant/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
-        body: JSON.stringify({ message: msg, history: messages.value.map(m => ({ role: m.role, message: m.text })) }),
-    })
-    .then(res => res.json())
-    .then(data => {
-        messages.value.push({ role: 'assistant', text: data.reply || 'Keine Antwort erhalten.' });
-    })
-    .catch(e => {
-        messages.value.push({ role: 'assistant', text: 'Fehler: ' + e.message });
-    })
-    .finally(() => {
-        loading.value = false;
-        scrollToBottom();
-    });
+    for (const block of blocks) {
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        try {
+            const res = await fetch('/api/assistant/write', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+                body: JSON.stringify(block),
+            });
+            const result = await res.json();
+            if (result.saved) {
+                addMessage('system', '✅ ' + block.type + ' gespeichert (ID: ' + (result.result?.id || result.result?.key || 'ok') + ')');
+                // Nach Write die Seite refreshen (neue ICPs/Personas sichtbar)
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                addMessage('system', '⚠️ Fehler beim Speichern: ' + JSON.stringify(result));
+            }
+        } catch (e) {
+            addMessage('system', '⚠️ Fehler: ' + e.message);
+        }
+    }
 }
 </script>
 
@@ -102,7 +154,7 @@ function sendMessage() {
     <div ref="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
       <div v-for="(msg, i) in messages" :key="i" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
         <div class="max-w-[85%] rounded-xl px-3 py-2 text-sm"
-          :class="msg.role === 'user' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-900'">
+          :class="msg.role === 'user' ? 'bg-green-600 text-white' : msg.role === 'system' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-gray-100 text-gray-900'">
           <p class="whitespace-pre-wrap">{{ msg.text }}</p>
         </div>
       </div>

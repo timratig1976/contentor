@@ -47,8 +47,18 @@ class AnglePageController extends Controller
     {
         $angle->load(['strategy', 'source', 'contentItems.media']);
 
+        // Geladene Templates der Strategie für die Varianten-Generierung
+        $templates = [];
+        if ($angle->strategy) {
+            $contentStrategy = \App\Models\ContentStrategy::where('strategy_id', $angle->strategy->id)
+                ->where('key', 'post_templates')
+                ->first();
+            $templates = $contentStrategy?->content['templates'] ?? [];
+        }
+
         return Inertia::render('Angles/Show', [
             'angle' => $angle,
+            'templates' => $templates,
         ]);
     }
 }

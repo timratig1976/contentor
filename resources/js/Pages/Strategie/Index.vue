@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -129,7 +129,7 @@ async function confirmDeleteStrategy() {
 const forms = reactive({
     brand_voice: { personality: '', tone: 'direkt', never: [], must: [] },
     channel_rules: { channels: [] },
-    icp_channel_mapping: { mappings: [] },
+    icp_definitions: { icps: [], default_icp: '' },
     media_logic: { rules: [] },
     editorial_rhythm: { cadence: 'weekly', slots: [] },
     content_strategy: { pillars: [], goals: '' },
@@ -143,22 +143,50 @@ props.contentKeys.forEach(s => {
 const tabLabels = {
     brand_voice: 'Brand Voice',
     channel_rules: 'Kanal-Regeln',
-    icp_channel_mapping: 'ICP → Kanal',
+    icp_definitions: '🎯 ICP-Definitionen',
     media_logic: 'Medien-Logik',
     editorial_rhythm: 'Redaktions-Rhythmus',
     content_strategy: 'Content-Strategie',
     post_templates: 'Post-Templates',
     content_personas: 'Personas',
+    ki_settings: '🤖 KI-Einstellungen',
 };
 
 async function save() {
     saving.value = true; saved.value = false;
     try {
-        await fetch('/api/strategy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
-            body: JSON.stringify({ strategy: props.currentStrategy.key, key: activeTab.value, content: forms[activeTab.value] }),
-        });
+        const strategy = props.currentStrategy;
+        if (!strategy) return;
+
+        // ICP-Definitionen: speichern in ContentStrategy + Strategy.config.rules
+        if (activeTab.value === 'icp_definitions') {
+            await fetch('/api/strategy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+                body: JSON.stringify({ strategy: strategy.key, key: 'icp_definitions', content: forms.icp_definitions }),
+            });
+
+            const config = { ...(strategy.config || {}) };
+            config.rules = { ...(config.rules || {}) };
+            config.rules.icpGuesser = forms.icp_definitions.icps.map(icp => ({
+                icp: icp.key,
+                match: icp.match_keywords,
+            }));
+            config.rules.defaultIcp = forms.icp_definitions.default_icp || 'B2B-1';
+
+            await fetch(`/api/strategies/${strategy.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+                body: JSON.stringify({ config }),
+            });
+        } else {
+            await fetch('/api/strategy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+                body: JSON.stringify({ strategy: strategy.key, key: activeTab.value, content: forms[activeTab.value] }),
+            });
+        }
+
         saved.value = true; setTimeout(() => saved.value = false, 2000);
     } finally { saving.value = false; }
 }
@@ -211,11 +239,110 @@ async function saveAutoApprove() {
 }
 function removeItem(key, field, index) { forms[key][field].splice(index, 1); }
 function addChannel() { forms.channel_rules.channels.push({ channel: 'linkedin', frequency: 'weekly', best_times: [], rules: [] }); }
-function addMapping() { forms.icp_channel_mapping.mappings.push({ icp: '', channels: [], priority: 'medium' }); }
+function addIcp() { forms.icp_definitions.icps.push({ key: '', name: '', description: '', role: '', pain_points: [], gains: [], match_keywords: '', default_funnel: 'ToFu', priority: 'medium' }); }
+function removeIcp(index) {
+    const icp = forms.icp_definitions.icps[index];
+    if (!icp) return;
+    if (icp.key && !confirm(`ICP „${icp.key}${icp.name ? ' — ' + icp.name : ''}“ wirklich entfernen?`)) return;
+    forms.icp_definitions.icps.splice(index, 1);
+}
 function addTemplate() { forms.post_templates.templates.push({ format: 'linkedin_post', name: '', structure: [], example: '' }); }
+
+// ---- Template-Katalog (inline in Strategie) ----
+const templateFilter = ref('');
+const availableTemplates = [
+    { name: 'Contrarian Take', format: 'linkedin_post', description: 'Gegen den Mainstream — alle sagen X, Realität ist Y', best_for: ['B2B-2', 'B2B-3'], structure: "These gegen den Mainstream (max 8 Wörter)\nWarum der Mainstream irrt\nBeleg / Mechanismus\nWas das für den Leser heißt\nSoft CTA", example: 'CRM-Automatisierung macht euren Vertrieb schlechter.' },
+    { name: 'Data Drop', format: 'linkedin_post', description: 'Überraschende Zahl + Einordnung', best_for: ['B2B-1', 'B2B-2'], structure: "Überraschende Zahl / Fakt\nWarum das überrascht\nMechanismus dahinter\nKonsequenz\nSoft CTA", example: '73% der Forecasts liegen daneben.' },
+    { name: 'Mistake Post', format: 'linkedin_post', description: 'Die N häufigsten Fehler bei X', best_for: ['B2B-3', 'BK'], structure: "Fehler 1 + Folge\nFehler 2 + Folge\nFehler 3 + Folge\nWie man es richtig macht\nSoft CTA", example: '3 Fehler bei der HubSpot-Property-Hygiene.' },
+    { name: 'Framework / Modell', format: 'linkedin_post', description: 'Eigenes Denkmodell teilen', best_for: ['B2B-1', 'B2B-2'], structure: "Problem\nModell-Übersicht (3 Stufen)\nStufe 1-3\nErgebnis\nSoft CTA", example: 'Unser 3-Stufen-Modell für Datenhygiene.' },
+    { name: 'Storytelling Post', format: 'linkedin_post', description: 'Persönliche Geschichte mit Lerneffekt', best_for: ['B2B-1', 'B2B-3'], structure: "Hook (emotional)\nAusgangssituation\nWendepunkt\nLösung / Learnings\nCTA", example: 'Letzte Woche saß ich mit einem CEO zusammen.' },
+    { name: 'Listicle', format: 'linkedin_post', description: 'Aufzählung mit Mehrwert', best_for: ['B2B-1', 'B2B-2', 'B2B-3'], structure: "Hook (Zahl + Thema)\nPunkt 1\nPunkt 2\nPunkt 3\nFazit\nCTA", example: '5 Dinge, die wir von unseren besten Kunden gelernt haben.' },
+    { name: 'Question Post', format: 'linkedin_post', description: 'Frage ans Netzwerk, hohe Engagement-Rate', best_for: ['B2B-1', 'B2B-2', 'BK'], structure: "Frage (provokant)\nKontext\nEigene Einschätzung\nDiskussion", example: 'Warum haben die meisten kein Pipeline-Review?' },
+    { name: 'Ad Copy — Schmerz', format: 'ad_copy', description: 'Schmerz-getriebene Anzeige', best_for: ['B2B-2', 'B2B-3'], structure: "Primary Text (max 125)\nHeadline (max 40)\nDescription\nCTA", example: 'Primary: Forecast daneben?' },
+    { name: 'Ad Copy — Gain', format: 'ad_copy', description: 'Gain-getriebene Anzeige', best_for: ['B2B-1', 'B2B-2'], structure: "Primary Text (max 125)\nHeadline (max 40)\nDescription\nCTA", example: 'Primary: Planbares Wachstum.' },
+    { name: 'Newsletter BK', format: 'newsletter_bk', description: 'Bestandskunden-Mail', best_for: ['BK', 'UNI'], structure: "Betreff (max 50)\nPreview-Text\nEinleitung\nHauptteil\nNext Step\nSign-off", example: 'Betreff: Datenhygiene in 15 Minuten' },
+    { name: 'Landing Page', format: 'landing_page_headlines', description: 'Konversions-starke LP', best_for: ['B2B-1', 'B2B-2'], structure: "Hero Headline\nSub-Headline\n3 Bullet Points\nCTA-Button", example: 'Headline: Schluss mit Blindflug' },
+];
+const filteredTemplates = computed(() => {
+    if (!templateFilter.value) return availableTemplates;
+    return availableTemplates.filter(t => t.format === templateFilter.value);
+});
+function isTemplateSelected(name) {
+    return (forms.post_templates.templates || []).some(t => t.name === name);
+}
+function toggleTemplate(tpl) {
+    if (!forms.post_templates.templates) forms.post_templates.templates = [];
+    const idx = forms.post_templates.templates.findIndex(t => t.name === tpl.name);
+    if (idx >= 0) {
+        forms.post_templates.templates.splice(idx, 1);
+    } else {
+        forms.post_templates.templates.push({ format: tpl.format, name: tpl.name, structure: tpl.structure, example: tpl.example });
+    }
+}
+
+// ---- Template-Detail-Modal ----
+const detailModal = ref(null); // aktuell geöffnetes Template
+const modalGeneratedExample = ref('');
+const modalGenerating = ref(false);
+
+function openDetail(tpl) { detailModal.value = tpl; modalGeneratedExample.value = ''; }
+function closeDetail() { detailModal.value = null; }
+
+async function generateExampleForModal(tpl) {
+    if (!props.currentStrategy || modalGenerating.value) return;
+    modalGenerating.value = true;
+    try {
+        const res = await fetch('/api/assistant/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify({
+                message: `Generiere ein konkretes Beispiel für das Template "${tpl.name}" (Format: ${tpl.format}) für die Strategie "${props.currentStrategy.name}". Template-Struktur: ${tpl.structure}. Gib NUR den fertigen Content-Text aus, keine Erklärungen.`,
+                history: [],
+            }),
+        });
+        const data = await res.json();
+        modalGeneratedExample.value = data.reply || 'Keine Antwort.';
+    } catch { modalGeneratedExample.value = 'Fehler bei der Generierung.'; }
+    modalGenerating.value = false;
+}
+
 function addMediaRule() { forms.media_logic.rules.push({ format: 'image', style: '', aspect_ratio: '1:1', notes: '' }); }
 function addEditorialSlot() { forms.editorial_rhythm.slots.push({ day: 'Monday', channel: 'linkedin', format: 'post', persona: '' }); }
 function addPillar() { forms.content_strategy.pillars.push({ name: '', description: '', icp_focus: [] }); }
+
+// ---- ICP-Definitionen aus DB initialisieren ----
+function loadIcpFromConfig() {
+    const strategy = props.currentStrategy;
+    if (!strategy) return;
+
+    // 1. Aus ContentStrategy (gespeicherte UI-Daten)
+    const contentKey = props.contentKeys?.find(k => k.key === 'icp_definitions');
+    if (contentKey?.content?.icps?.length) {
+        forms.icp_definitions.icps = JSON.parse(JSON.stringify(contentKey.content.icps));
+        forms.icp_definitions.default_icp = contentKey.content.default_icp || '';
+        return;
+    }
+
+    // 2. Fallback: aus Strategy.config.rules (icpGuesser + clusters)
+    const rules = strategy.config?.rules || {};
+    const guesser = rules.icpGuesser || [];
+    if (guesser.length) {
+        forms.icp_definitions.icps = guesser.map(g => ({
+            key: g.icp,
+            name: '',
+            description: '',
+            role: '',
+            pain_points: [],
+            gains: [],
+            match_keywords: g.match || '',
+            default_funnel: 'ToFu',
+            priority: 'medium',
+        }));
+        forms.icp_definitions.default_icp = rules.defaultIcp || '';
+    }
+}
+onMounted(loadIcpFromConfig);
+
 </script>
 
 <template>
@@ -334,6 +461,101 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
       </div>
     </div>
 
+    <div v-if="activeTab === 'ki_settings'" class="space-y-4">
+
+      <!-- Auto-Approve -->
+      <div class="bg-white border border-gray-200 rounded-xl p-5">
+        <div class="flex items-start justify-between gap-6">
+          <div class="flex-1">
+            <h3 class="text-sm font-semibold text-gray-900 mb-0.5">Auto-Approve Schwellenwert</h3>
+            <p class="text-xs text-gray-500 mb-3">Angles ab diesem Score werden automatisch auf <span class="text-green-600 font-medium">approved</span> gesetzt. Leer lassen für immer manuelle Review.</p>
+            <div class="flex items-center gap-3">
+              <div class="relative w-32">
+                <input type="number" min="1" max="12" v-model.number="autoApproveScore"
+                  class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 text-center font-semibold focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
+                  placeholder="—" />
+                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">/ 12</span>
+              </div>
+              <button @click="saveAutoApprove" :disabled="autoApproveSaving"
+                class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                {{ autoApproveSaving ? 'Speichern…' : 'Speichern' }}
+              </button>
+              <span v-if="autoApproveSaved" class="text-xs text-green-600 font-medium">✓ Gespeichert</span>
+            </div>
+          </div>
+
+          <!-- Score-Legende kompakt -->
+          <div class="shrink-0 bg-gray-50 border border-gray-100 rounded-lg p-3 text-xs space-y-1.5 min-w-[220px]">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Score-Legende</p>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+              <span class="font-medium text-gray-700 w-16">≥ 10</span>
+              <span class="text-gray-500">Top — auto-approved</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-yellow-400 shrink-0"></span>
+              <span class="font-medium text-gray-700 w-16">7 – 9</span>
+              <span class="text-gray-500">Solide — Review</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-red-400 shrink-0"></span>
+              <span class="font-medium text-gray-700 w-16">&lt; 7</span>
+              <span class="text-gray-500">Schwach — überarbeiten</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-gray-300 shrink-0"></span>
+              <span class="font-medium text-gray-700 w-16">—</span>
+              <span class="text-gray-500">Nicht bewertet</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Kriterien-Übersicht -->
+      <div class="bg-white border border-gray-200 rounded-xl p-5">
+        <h3 class="text-sm font-semibold text-gray-900 mb-3">Scoring-Kriterien</h3>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs font-semibold text-gray-700 mb-0.5">Zielgruppe</p>
+            <p class="text-xs text-gray-500">Wie präzise trifft der Angle den ICP?</p>
+            <div class="flex gap-1 mt-2">
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">1 generisch</span>
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">2 relevant</span>
+              <span class="text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5 text-green-700">3 punktgenau</span>
+            </div>
+          </div>
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs font-semibold text-gray-700 mb-0.5">Strategie-Fit</p>
+            <p class="text-xs text-gray-500">Passt der Angle zur Positionierung?</p>
+            <div class="flex gap-1 mt-2">
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">1 schwach</span>
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">2 passend</span>
+              <span class="text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5 text-green-700">3 perfekt</span>
+            </div>
+          </div>
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs font-semibold text-gray-700 mb-0.5">Schärfe</p>
+            <p class="text-xs text-gray-500">Wie provokativ / meinungsstark?</p>
+            <div class="flex gap-1 mt-2">
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">1 neutral</span>
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">2 pointiert</span>
+              <span class="text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5 text-green-700">3 scharf</span>
+            </div>
+          </div>
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs font-semibold text-gray-700 mb-0.5">Timing</p>
+            <p class="text-xs text-gray-500">Wie aktuell / relevant ist das Thema?</p>
+            <div class="flex gap-1 mt-2">
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">1 evergreen</span>
+              <span class="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-500">2 aktuell</span>
+              <span class="text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5 text-green-700">3 trend</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
     <div v-if="activeTab === 'channel_rules'" class="space-y-5">
       <div class="flex justify-between items-center">
         <h3 class="text-sm font-semibold text-gray-900">Kanal-Regelwerk</h3>
@@ -351,13 +573,101 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
       <p v-if="!forms.channel_rules.channels.length" class="text-sm text-gray-500 italic">Noch keine Kanäle definiert.</p>
     </div>
 
-    <div v-if="activeTab === 'icp_channel_mapping'" class="space-y-5">
-      <div class="flex justify-between items-center"><h3 class="text-sm font-semibold text-gray-900">ICP → Kanal Mapping</h3><button @click="addMapping" class="neu-btn-primary px-4 py-2 text-sm">+ Mapping</button></div>
-      <div v-for="(m, i) in forms.icp_channel_mapping.mappings" :key="i" class="bg-white border border-gray-200 rounded-xl p-5 flex items-start gap-4">
-        <div class="flex-1"><input v-model="m.icp" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 mb-2" placeholder="ICP (z.B. B2B-1)" /><div class="flex flex-wrap gap-2"><label v-for="ch in ['linkedin', 'newsletter', 'blog', 'meta_ads', 'linkedin_ads']" :key="ch" class="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" :value="ch" v-model="m.channels" class="rounded border-gray-300 text-green-600 focus:ring-2 focus:ring-green-500/20" /> {{ ch }}</label></div></div>
-        <select v-model="m.priority" class="bg-white border border-gray-300 rounded-lg px-2 py-2 text-sm text-gray-900"><option value="high">🔴 Hoch</option><option value="medium">🟡 Mittel</option><option value="low">🟢 Niedrig</option></select>
-        <button @click="forms.icp_channel_mapping.mappings.splice(i, 1)" class="text-red-500 hover:text-red-700">✕</button>
+    <div v-if="activeTab === 'icp_definitions'" class="space-y-5">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-900">ICP-Definitionen</h3>
+          <p class="text-xs text-gray-500 mt-0.5">Definiere deine Zielgruppen-Segmente mit Pain Points, Gains und Match-Keywords für die automatische Erkennung.</p>
+        </div>
       </div>
+
+      <!-- Default ICP -->
+      <div class="bg-white border border-gray-200 rounded-xl p-4">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-gray-900 shrink-0">Standard-ICP</label>
+          <select v-model="forms.icp_definitions.default_icp" class="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900">
+            <option value="">—</option>
+            <option v-for="icp in forms.icp_definitions.icps" :key="icp.key" :value="icp.key">{{ icp.key }} — {{ icp.name || icp.key }}</option>
+          </select>
+          <p class="text-xs text-gray-500">Fallback-ICP, wenn kein Regex-Match auf den Angle-Text.</p>
+        </div>
+      </div>
+
+      <!-- ICP Cards -->
+      <div v-for="(icp, i) in forms.icp_definitions.icps" :key="i" class="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-semibold text-gray-900">{{ icp.key || 'Neuer ICP' }}{{ icp.name ? ' — ' + icp.name : '' }}</h4>
+          <button @click="removeIcp(i)" class="text-red-500 hover:text-red-700 text-sm">✕ Entfernen</button>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Key *</label>
+            <input v-model="icp.key" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono" placeholder="B2B-1" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Name</label>
+            <input v-model="icp.name" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="CRM-Entscheider Mittelstand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Rolle</label>
+            <input v-model="icp.role" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="CEO / Head of Sales" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Default Funnel</label>
+            <select v-model="icp.default_funnel" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900">
+              <option value="ToFu">ToFu (Bewusstsein)</option>
+              <option value="MoFu">MoFu (Überlegung)</option>
+              <option value="BoFu">BoFu (Entscheidung)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-gray-900 mb-1 font-medium">Beschreibung</label>
+          <textarea v-model="icp.description" rows="2" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Wer ist das? 2-3 Sätze."></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-700 mb-1 font-medium">🔥 Pain Points</label>
+            <div class="space-y-1.5 mb-1.5">
+              <div v-for="(p, pi) in (icp.pain_points || [])" :key="pi" class="flex gap-2">
+                <input v-model="icp.pain_points[pi]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. Blindflug im Forecast" />
+                <button @click="icp.pain_points.splice(pi, 1)" class="text-red-500">✕</button>
+              </div>
+            </div>
+            <button @click="icp.pain_points = [...(icp.pain_points || []), '']" class="text-xs text-green-600 font-medium">+ Pain Point</button>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-700 mb-1 font-medium">✅ Gains (was will der erreichen?)</label>
+            <div class="space-y-1.5 mb-1.5">
+              <div v-for="(g, gi) in (icp.gains || [])" :key="gi" class="flex gap-2">
+                <input v-model="icp.gains[gi]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. Planbares Wachstum" />
+                <button @click="icp.gains.splice(gi, 1)" class="text-red-500">✕</button>
+              </div>
+            </div>
+            <button @click="icp.gains = [...(icp.gains || []), '']" class="text-xs text-green-600 font-medium">+ Gain</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Match-Keywords (Regex, Auto-Erkennung)</label>
+            <input v-model="icp.match_keywords" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono" placeholder="forecast|pipeline|sales|head of sales" />
+          </div>
+          <div class="flex items-end gap-3 pb-1">
+            <label class="text-xs text-gray-700 font-medium shrink-0">Priorität</label>
+            <select v-model="icp.priority" class="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-900">
+              <option value="high">🔴 Hoch</option>
+              <option value="medium">🟡 Mittel</option>
+              <option value="low">🟢 Niedrig</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button @click="addIcp" class="neu-btn-primary px-4 py-2 text-sm">+ ICP hinzufügen</button>
     </div>
 
     <div v-if="activeTab === 'media_logic'" class="space-y-5">
@@ -401,14 +711,85 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
     </div>
 
     <div v-if="activeTab === 'post_templates'" class="space-y-5">
-      <div class="flex justify-between items-center"><h3 class="text-sm font-semibold text-gray-900">Post-Templates & Regeln</h3><button @click="addTemplate" class="neu-btn-primary px-4 py-2 text-sm">+ Template</button></div>
-      <div v-for="(tpl, i) in (forms.post_templates.templates || [])" :key="i" class="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
-        <div class="flex items-center justify-between"><div class="flex gap-2 items-center"><select v-model="tpl.format" class="bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-900"><option value="linkedin_post">LinkedIn Post</option><option value="ad_copy">Ad Copy</option><option value="newsletter_acquisition">Newsletter</option><option value="landing_page_headlines">Landing Page</option></select><input v-model="tpl.name" class="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Template-Name" /></div><button @click="forms.post_templates.templates.splice(i, 1)" class="text-red-500 hover:text-red-700">✕</button></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">Struktur (ein Element pro Zeile)</label><textarea v-model="tpl.structure" rows="5" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="Hook (Zeile 1)\nMechanismus\nProof\nCTA"></textarea></div>
-        <div><label class="block text-sm text-gray-900 mb-1 font-medium">Beispiel</label><textarea v-model="tpl.example" rows="4" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Ein Beispiel-Post..."></textarea></div>
+
+      <!-- Katalog zum Auswählen -->
+      <div class="bg-white border border-gray-200 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">Template-Katalog</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Klick = Auswählen/Abwählen. Rechtsklick auf Name = Details + KI-Beispiel.</p>
+          </div>
+          <select v-model="templateFilter" class="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900">
+            <option value="">Alle Formate</option>
+            <option value="linkedin_post">LinkedIn Post</option>
+            <option value="ad_copy">Ad Copy</option>
+            <option value="newsletter_bk">Newsletter BK</option>
+            <option value="newsletter_acquisition">Newsletter Acquisition</option>
+            <option value="landing_page_headlines">Landing Page</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div v-for="tpl in filteredTemplates" :key="tpl.name"
+            class="border border-gray-200 rounded-lg p-3 hover:border-green-300 hover:shadow-sm transition-all cursor-pointer"
+            :class="isTemplateSelected(tpl.name) ? 'ring-2 ring-green-400 border-green-400 bg-green-50/30' : ''">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-sm font-medium text-gray-900 hover:text-green-700" @click.stop="openDetail(tpl)">{{ tpl.name }}</span>
+              <span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ tpl.format }}</span>
+            </div>
+            <p class="text-xs text-gray-500 mb-2" @click="toggleTemplate(tpl)">{{ tpl.description }}</p>
+            <div class="flex flex-wrap gap-1 items-center" @click="toggleTemplate(tpl)">
+              <span v-for="icp in (tpl.best_for || [])" :key="icp" class="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{{ icp }}</span>
+              <span v-if="isTemplateSelected(tpl.name)" class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full ml-auto font-medium">✓ Ausgewählt</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
+    <!-- Template-Detail-Modal -->
+    <div v-if="detailModal" class="fixed inset-0 z-50 flex items-center justify-center" @click.self="closeDetail">
+      <div class="fixed inset-0 bg-black/40"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-2xl mx-4 z-10 max-h-[80vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-5">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-900">{{ detailModal.name }}</h3>
+            <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{{ detailModal.format }}</span>
+          </div>
+          <button @click="closeDetail" class="text-gray-400 hover:text-gray-900 text-xl">✕</button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6 mb-5">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Struktur</label>
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line font-mono">{{ detailModal.structure }}</div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Beispiel</label>
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line mb-3 min-h-[100px]">
+              <template v-if="modalGeneratedExample">{{ modalGeneratedExample }}</template>
+              <template v-else>{{ detailModal.example }}</template>
+            </div>
+            <div class="flex items-center gap-3">
+              <button @click="generateExampleForModal(detailModal)" :disabled="modalGenerating"
+                class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                {{ modalGenerating ? 'Generiert…' : '🤖 Beispiel generieren' }}
+              </button>
+              <button v-if="modalGeneratedExample" @click="modalGeneratedExample = ''"
+                class="text-xs text-gray-500 underline">Zurücksetzen</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 pt-3 border-t border-gray-200">
+          <button @click="toggleTemplate(detailModal); closeDetail()"
+            class="px-4 py-2 text-sm rounded-lg font-medium"
+            :class="isTemplateSelected(detailModal.name) ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100' : 'bg-green-600 text-white hover:bg-green-700'">
+            {{ isTemplateSelected(detailModal.name) ? '✕ Aus Strategie entfernen' : '+ In Strategie übernehmen' }}
+          </button>
+          <button @click="closeDetail" class="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Schließen</button>
+        </div>
+      </div>
+    </div>
     <!-- Personas: globale Personas dieser Strategie zuordnen (nicht anlegen) -->
     <div v-if="activeTab === 'content_personas'" class="space-y-5">
       <div class="flex justify-between items-center">
@@ -499,7 +880,7 @@ function addPillar() { forms.content_strategy.pillars.push({ name: '', descripti
       </div>
     </div>
 
-    <div v-if="activeTab !== 'content_personas'" class="mt-6 flex items-center gap-3 pt-4 border-t border-gray-200">
+    <div v-if="activeTab !== 'content_personas' && activeTab !== 'ki_settings' && activeTab !== 'icp_definitions'" class="mt-6 flex items-center gap-3 pt-4 border-t border-gray-200">
       <button @click="save" :disabled="saving" class="neu-btn-primary px-4 py-2 text-sm">{{ saving ? 'Speichert...' : '💾 Strategie speichern' }}</button>
       <span v-if="saved" class="text-sm text-green-600">✓ Gespeichert!</span>
     </div>

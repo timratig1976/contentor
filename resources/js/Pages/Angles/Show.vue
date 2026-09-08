@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 const props = defineProps({
     angle: Object,
+    templates: Array,
 });
 
 const rankings = ref({
@@ -15,6 +16,9 @@ const rankings = ref({
 });
 
 const saving = ref(false);
+const generating = ref(false);
+const generateResult = ref(null);
+const selectedTemplates = ref([]);
 
 function updateRanking() {
     saving.value = true;
@@ -30,6 +34,53 @@ const criteriaLabels = {
     r_schaerfe: 'Schärfe',
     r_timing: 'Timing',
 };
+
+function toggleTemplate(tpl) {
+    const idx = selectedTemplates.value.findIndex(t => t.name === tpl.name);
+    if (idx >= 0) selectedTemplates.value.splice(idx, 1);
+    else selectedTemplates.value.push(tpl);
+}
+
+function isSelected(name) {
+    return selectedTemplates.value.some(t => t.name === name);
+}
+
+async function generateVariants() {
+    if (!selectedTemplates.value.length) return;
+    generating.value = true;
+    generateResult.value = null;
+
+    const patterns = selectedTemplates.value.map(t =>
+        t.name.toLowerCase().includes('contrarian') ? 'contrarian' :
+        t.name.toLowerCase().includes('data') ? 'data_drop' :
+        t.name.toLowerCase().includes('mistake') ? 'mistake_post' :
+        t.name.toLowerCase().includes('story') ? 'story' :
+        t.name.toLowerCase().includes('listicle') ? 'listicle' :
+        t.name.toLowerCase().includes('question') ? 'question' :
+        'contrarian'
+    );
+
+    // Pro Template ein Format — wir nutzen das Format des ersten ausgewählten
+    const format = selectedTemplates.value[0]?.format || 'linkedin_post';
+
+    try {
+        const res = await fetch('/api/content/produzieren', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+            body: JSON.stringify({
+                angle_id: props.angle.id,
+                strategy: props.angle.strategy?.key,
+                format: format,
+                variants_count: selectedTemplates.value.length,
+                variant_patterns: patterns,
+            }),
+        });
+        generateResult.value = await res.json();
+    } catch (e) {
+        generateResult.value = { error: e.message };
+    }
+    generating.value = false;
+}
 </script>
 
 <template>
@@ -158,17 +209,44 @@ const criteriaLabels = {
 
                 <!-- Produzieren -->
                 <div class="neu-card p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Produzieren</h3>
-                    <div class="space-y-2">
-                        <button class="w-full px-4 py-2 bg-neu hover:bg-neu text-gray-800 rounded-lg text-sm transition-colors">
-                            LinkedIn Post
-                        </button>
-                        <button class="w-full px-4 py-2 bg-neu hover:bg-gray-300 text-gray-800 rounded-lg text-sm transition-colors">
-                            Ad Copy
-                        </button>
-                        <button class="w-full px-4 py-2 bg-neu hover:bg-gray-300 text-gray-800 rounded-lg text-sm transition-colors">
-                            Newsletter BK
-                        </button>
+                    <h3 class="text-lg font-semibold text-gray-800 mb-3">Produzieren</h3>
+
+                    <!-- Template-Auswahl -->
+                    <div v-if="templates?.length" class="space-y-2 mb-4">
+                        <p class="text-xs text-gray-500 font-medium">Template wählen:</p>
+                        <div v-for="tpl in templates" :key="tpl.name"
+                            class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors text-sm"
+                            :class="isSelected(tpl.name) ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'"
+                            @click="toggleTemplate(tpl)">
+                            <span class="text-xs" :class="isSelected(tpl.name) ? 'text-green-600' : 'text-gray-400'">{{ isSelected(tpl.name) ? '✓' : '○' }}</span>
+                            <span class="font-medium">{{ tpl.name }}</span>
+                            <span class="text-xs text-gray-400 ml-auto">{{ tpl.format }}</span>
+                        </div>
+                    </div>
+                    <div v-else class="text-xs text-gray-400 italic mb-4">
+                        Keine Templates in der Strategie ausgewählt.
+                        <a href="/strategie" class="text-green-600 underline">Strategie bearbeiten</a>
+                    </div>
+
+                    <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
+                        class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                        {{ generating ? 'Generiere…' : '🚀 ' + selectedTemplates.length + ' Varianten generieren' }}
+                    </button>
+
+                    <!-- Ergebnis -->
+                    <div v-if="generateResult" class="mt-4 space-y-3">
+                        <div v-if="generateResult.error" class="text-sm text-red-600">{{ generateResult.error }}</div>
+                        <div v-for="item in (generateResult.items || [])" :key="item.id"
+                            class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-xs font-medium text-gray-600">{{ item.variant_pattern || 'Standard' }}</span>
+                                <span class="text-xs text-gray-400">{{ item.id }}</span>
+                            </div>
+                            <p class="text-sm text-gray-900 whitespace-pre-line line-clamp-4">{{ item.content }}</p>
+                            <div class="mt-2 flex gap-2">
+                                <a :href="`/output`" class="text-xs text-green-600 underline">Im Output ansehen</a>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
