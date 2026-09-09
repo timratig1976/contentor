@@ -148,6 +148,26 @@ const activePost = computed(() => posts.value.find(p => p.id === activePostId.va
 
 function selectPost(p) { activePostId.value = p.id; }
 
+// Beim Laden: bereits existente, nicht verworfene Posts in den Editor holen,
+// damit sie hier direkt weiter verfeinert werden können (ohne Umweg über Output).
+onMounted(() => {
+    const existing = (props.angle.content_items || []).filter(i => i.type === 'post' && i.status !== 'verworfen');
+    if (existing.length) {
+        posts.value = existing;
+        activePostId.value = existing[existing.length - 1].id; // zuletzt erzeugt
+    }
+});
+
+// Bestehenden Post aus der Liste in den Editor laden (zum Weiterverfeinern)
+function loadIntoEditor(item) {
+    if (!posts.value.some(p => p.id === item.id)) {
+        posts.value.push(item);
+    }
+    activePostId.value = item.id;
+    // Scroll zum Editor
+    document.querySelector('textarea')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 // ─── Quality-Gate-Anzeige ───
 const QUALITY_PASS = 7;
 function qualityClass(score) {
@@ -191,7 +211,8 @@ async function generateVariants() {
             const msg = data?.message || data?.error || `HTTP ${res.status}`;
             generateError.value = typeof msg === 'string' ? msg : JSON.stringify(msg);
         } else {
-            posts.value = data.items;
+            // Neue Posts anhängen (statt vorhandene zu ersetzen) und auswählen
+            posts.value = [...posts.value, ...data.items];
             activePostId.value = data.items[0]?.id || null;
         }
     } catch (e) {
@@ -486,13 +507,21 @@ onMounted(recommendStatement);
 
                 <!-- Bestehende Posts -->
                 <div v-if="angle.content_items?.length" class="neu-card">
-                    <div class="p-4 border-b border-gray-100"><h3 class="text-sm font-semibold text-gray-800">Bestehende Posts</h3></div>
+                    <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+                        <h3 class="text-sm font-semibold text-gray-800">Bestehende Posts</h3>
+                        <span class="text-[11px] text-gray-400">Klicken → im Editor verfeinern</span>
+                    </div>
                     <div class="divide-y divide-gray-100">
-                        <div v-for="item in angle.content_items" :key="item.id" class="px-4 py-2.5 flex items-center justify-between text-sm">
-                            <div>
-                                <p class="text-gray-800">{{ item.title || item.content?.substring(0, 70) }}</p>
-                                <p class="text-xs text-gray-400">{{ item.format }} · {{ item.status }}</p>
+                        <div v-for="item in angle.content_items" :key="item.id" @click="loadIntoEditor(item)"
+                            class="px-4 py-2.5 flex items-center justify-between text-sm cursor-pointer hover:bg-gray-50"
+                            :class="activePostId === item.id ? 'bg-green-50/60' : ''">
+                            <div class="min-w-0">
+                                <p class="text-gray-800 truncate">{{ item.title || item.content?.substring(0, 70) }}</p>
+                                <p class="text-xs text-gray-400">{{ formatLabels[item.format] || item.format }} · {{ item.status }}<span v-if="item.variant_pattern"> · {{ item.variant_pattern }}</span></p>
                             </div>
+                            <span v-if="activePostId === item.id" class="text-xs text-green-600 shrink-0 ml-2">✎ im Editor</span>
+                            <span v-else-if="item.quality_score !== null && item.quality_score !== undefined" class="text-xs shrink-0 ml-2"
+                                :class="item.quality_score >= 7 ? 'text-green-600' : item.quality_score >= 5 ? 'text-amber-600' : 'text-red-500'">⭐ {{ item.quality_score }}/10</span>
                         </div>
                     </div>
                 </div>

@@ -5,7 +5,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 
 const props = defineProps({ strategies: Array, currentStrategy: Object, items: Array, kpis: Object, learningReport: Object });
 
-const previewFormat = ref('linkedin');
+const previewFormat = ref('all');
 const selectedItem = ref(null);
 const seoMode = ref(false);
 const detailTab = ref('preview'); // preview | seo | kpi
@@ -14,11 +14,45 @@ const detailTab = ref('preview'); // preview | seo | kpi
 const variantGroup = ref(null);       // alle Items einer variant_group_id
 const variantLoading = ref(false);
 
+// Format-Tabs mit echten Format-Keys (vorher Bug: 'linkedin' ≠ 'linkedin_post')
+const formatTabs = [
+    { key: 'all', label: 'Alle' },
+    { key: 'linkedin_post', label: 'LinkedIn' },
+    { key: 'blog_post', label: 'Blog' },
+    { key: 'ad_copy', label: 'Ad Copy' },
+    { key: 'newsletter_acquisition', label: 'Newsletter' },
+    { key: 'newsletter_bk', label: 'Newsletter BK' },
+    { key: 'landing_page_headlines', label: 'Landing Page' },
+];
+const fmtLabels = {
+    linkedin_post: 'LinkedIn', blog_post: 'Blog', ad_copy: 'Ad Copy',
+    newsletter_acquisition: 'Newsletter', newsletter_bk: 'Newsletter BK',
+    landing_page_headlines: 'Landing Page',
+};
+
 const filteredItems = computed(() => {
-    return props.items.filter(i => i.format === previewFormat.value || previewFormat.value === 'all');
+    return props.items.filter(i => previewFormat.value === 'all' || i.format === previewFormat.value);
 });
 
-const formats = ['linkedin', 'newsletter', 'ad', 'blog'];
+// Listenansicht: alle Posts eines Angles gebündelt
+const groupedByAngle = computed(() => {
+    const groups = new Map();
+    for (const item of filteredItems.value) {
+        const key = item.angle_id || 'no-angle';
+        if (!groups.has(key)) groups.set(key, { angleId: item.angle_id, angle: item.angle, items: [] });
+        groups.get(key).items.push(item);
+    }
+    return [...groups.values()];
+});
+
+const statusClasses = {
+    idee: 'bg-gray-100 text-gray-600',
+    in_produktion: 'bg-blue-50 text-blue-600',
+    review: 'bg-amber-50 text-amber-700',
+    geplant: 'bg-green-50 text-green-700',
+    live: 'bg-emerald-100 text-emerald-800',
+    verworfen: 'bg-red-50 text-red-500 line-through',
+};
 
 function openItem(item) {
     selectedItem.value = item;
@@ -186,51 +220,55 @@ function seoScore(item) {
     </div>
 
     <!-- Format Tabs -->
-    <div class="flex gap-1 mb-4">
-      <button @click="previewFormat='all'" class="px-4 py-2 rounded-lg text-sm font-medium"
-        :class="previewFormat==='all'?'bg-white border border-gray-200 text-gray-900':'text-gray-500 hover:text-gray-900'">
-        Alle ({{ items.length }})
-      </button>
-      <button v-for="f in formats" :key="f" @click="previewFormat=f" class="px-4 py-2 rounded-lg text-sm font-medium"
-        :class="previewFormat===f?'bg-white border border-gray-200 text-gray-900':'text-gray-500 hover:text-gray-900'">
-        {{ f === 'linkedin' ? 'LinkedIn' : f === 'newsletter' ? 'Newsletter' : f === 'ad' ? 'Ad' : 'Blog' }}
-        ({{ items.filter(i => i.format === `linkedin_post` || i.format === `ad_copy` || i.format === `newsletter_acquisition` || i.format === `landing_page_headlines`).filter(i => i.format?.startsWith(f)).length }})
+    <div class="flex gap-1 mb-4 flex-wrap">
+      <button v-for="t in formatTabs" :key="t.key" @click="previewFormat = t.key" class="px-4 py-2 rounded-lg text-sm font-medium"
+        :class="previewFormat===t.key?'bg-white border border-gray-200 text-gray-900':'text-gray-500 hover:text-gray-900'">
+        {{ t.label }} ({{ t.key === 'all' ? items.length : items.filter(i => i.format === t.key).length }})
       </button>
     </div>
 
-    <!-- Post Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-      <div v-for="item in filteredItems" :key="item.id" @click="openItem(item)"
-        class="bg-white border border-gray-200 rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">{{ item.format }}</span>
-          <span class="text-xs text-gray-400">{{ item.status }}</span>
+    <!-- Listenansicht: Posts nach Angle gebündelt -->
+    <div class="space-y-3 mb-6">
+      <div v-for="group in groupedByAngle" :key="group.angleId || 'no-angle'" class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <!-- Angle-Header -->
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm text-gray-900 font-medium" :title="group.angle?.angle">{{ group.angle?.angle || 'Ohne Angle' }}</p>
+            <p class="text-xs text-gray-400 mt-0.5">
+              <span v-if="group.angleId" class="font-mono">{{ group.angleId }} · </span>
+              <span v-if="group.angle?.icp">ICP {{ group.angle.icp }} · </span>
+              <span v-if="group.angle?.statement_type">{{ group.angle.statement_type }} · </span>
+              {{ group.items.length }} Post(s)
+            </p>
+          </div>
+          <a v-if="group.angleId" :href="`/angles/${group.angleId}`" class="text-xs text-blue-600 hover:underline whitespace-nowrap shrink-0">Zum Angle →</a>
         </div>
-        <!-- Varianten-Badge -->
-        <div v-if="item.variant_group_id" class="mb-2 flex items-center gap-2">
-          <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{{ item.variant_pattern }}</span>
-          <button @click.stop="showVariants(item.variant_group_id)"
-            class="text-xs text-gray-500 underline hover:text-gray-700">
-            Alle Varianten zeigen
-          </button>
-        </div>
-        <p class="text-sm text-gray-900 font-medium mb-2 line-clamp-2">{{ item.title || item.angle?.angle }}</p>
-        <div class="text-xs text-gray-500 mb-2">
-          <span v-if="item.persona">{{ item.persona?.name }} · </span>
-          {{ item.created_at?.split('T')[0] }}
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-400">SEO: {{ seoScore(item) }}/5</span>
-          <span class="text-xs text-gray-300">·</span>
-          <span class="text-xs text-gray-400">{{ item.refinement_count || 0 }} Optimierungen</span>
-          <span v-if="kpis?.[item.id]" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
-            :title="`Impressions: ${kpis[item.id].impressions} · Likes: ${kpis[item.id].likes} · Leads: ${kpis[item.id].leads}`">
-            📈 {{ kpis[item.id].leads > 0 ? kpis[item.id].leads + ' Leads' : kpis[item.id].impressions + ' Impr.' }}
-          </span>
+        <!-- Post-Zeilen: wichtigste Key-Facts auf einen Blick -->
+        <div class="divide-y divide-gray-100">
+          <div v-for="item in group.items" :key="item.id" @click="openItem(item)"
+            class="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50">
+            <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 shrink-0">{{ fmtLabels[item.format] || item.format }}</span>
+            <span v-if="item.variant_pattern" class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full shrink-0">{{ item.variant_pattern }}</span>
+            <span class="text-xs text-gray-600 truncate flex-1" :title="item.content || ''">{{ item.title || (item.content || '').slice(0, 70) }}</span>
+            <span v-if="item.quality_score !== null && item.quality_score !== undefined"
+              class="text-xs font-semibold shrink-0"
+              :class="item.quality_score >= 7 ? 'text-green-600' : item.quality_score >= 5 ? 'text-amber-600' : 'text-red-500'"
+              :title="item.quality_comment || ''">⭐ {{ item.quality_score }}/10</span>
+            <span v-if="kpis?.[item.id]" class="text-xs text-emerald-700 shrink-0"
+              :title="`Impressions: ${kpis[item.id].impressions} · Likes: ${kpis[item.id].likes} · Leads: ${kpis[item.id].leads}`">
+              📈 {{ kpis[item.id].leads > 0 ? kpis[item.id].leads + ' Leads' : kpis[item.id].impressions + ' Impr.' }}
+            </span>
+            <span v-if="item.persona" class="text-xs text-gray-400 shrink-0 hidden xl:inline">{{ item.persona.name }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full shrink-0" :class="statusClasses[item.status] || 'bg-gray-100 text-gray-600'">{{ item.status }}</span>
+            <span class="text-xs text-gray-300 shrink-0">{{ item.created_at?.split('T')[0] }}</span>
+            <button v-if="item.variant_group_id" @click.stop="showVariants(item.variant_group_id)"
+              class="text-xs text-gray-400 underline hover:text-gray-700 shrink-0"
+              title="A/B-Varianten dieser Gruppe vergleichen">⇄</button>
+          </div>
         </div>
       </div>
-      <div v-if="filteredItems.length===0" class="col-span-full text-center py-12 text-sm text-gray-500">
-        Noch keine Content-Posts für dieses Format. Produziere Content über die Agents-Seite oder Quick Input.
+      <div v-if="!groupedByAngle.length" class="text-center py-12 text-sm text-gray-500 bg-white border border-gray-200 rounded-xl">
+        Noch keine Content-Posts für dieses Format. Produziere Content über die Angle-Seite oder Quick Input.
       </div>
     </div>
 
