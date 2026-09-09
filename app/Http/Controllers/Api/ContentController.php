@@ -440,11 +440,12 @@ class ContentController extends Controller
 
         $systemPrompt = $agentPrompts['production']
             ?? 'Du bist ein B2B-Content-Texter. Schreibe NUR den fertigen Content-Text, keine Erklärungen, keine Meta-Kommentare.';
-        // Strategie-Kontext-Platzhalter ersetzen (wie im Agent-Test-Pfad)
-        if (str_contains($systemPrompt, '{{strategy_context}}')) {
-            $contextBlock = app(\App\Services\AgentContextService::class)->build($strategy->key);
-            $systemPrompt = str_replace('{{strategy_context}}', $contextBlock, $systemPrompt);
-        }
+        // Strategie-Kontext: Platzhalter ersetzen ODER anhängen (wie im Agent-Test-Pfad),
+        // damit ICPs, Cluster, Markt-Lücken und Tonalität immer im System-Prompt landen.
+        $contextBlock = app(\App\Services\AgentContextService::class)->build($strategy->key);
+        $systemPrompt = str_contains($systemPrompt, '{{strategy_context}}')
+            ? str_replace('{{strategy_context}}', $contextBlock, $systemPrompt)
+            : $systemPrompt . "\n\n" . $contextBlock;
         // Der konfigurierbare Prompt richtet sich teils an Tool-Agenten — für den
         // direkten Completion-Call explizit auf Textproduktion umschalten.
         $systemPrompt .= "\n\n---\nAKTUELLER AUFTRAG: Du erhältst gleich einen konkreten Produktionsauftrag. "
@@ -582,7 +583,7 @@ class ContentController extends Controller
         if ($angle->pain_cluster) {
             $lines[] = "Pain-Cluster: {$angle->pain_cluster}";
         }
-        foreach (['metric', 'mechanism', 'proofs', 'cta'] as $k) {
+        foreach (['metric', 'mechanism', 'proofs', 'cta', 'kpis'] as $k) {
             if (!empty($params[$k])) {
                 $lines[] = strtoupper($k) . " (vorgegeben): {$params[$k]}";
             }
@@ -662,9 +663,27 @@ class ContentController extends Controller
                 }
             }
         }
+        // Brand Voice: unterstützt beide Schemata —
+        // legacy {rules: [...]} und Templates-UI {personality, tone, never, must}
         $voiceRules = $brandVoice['rules'] ?? [];
         if ($voiceRules) {
             $lines[] = "BRAND VOICE:\n- " . implode("\n- ", $voiceRules);
+        }
+        $voiceLines = [];
+        if (!empty($brandVoice['personality'])) {
+            $voiceLines[] = "Persönlichkeit: {$brandVoice['personality']}";
+        }
+        if (!empty($brandVoice['tone'])) {
+            $voiceLines[] = "Tonalität: {$brandVoice['tone']}";
+        }
+        if (!empty($brandVoice['must'])) {
+            $voiceLines[] = "IMMER tun: " . implode('; ', (array) $brandVoice['must']);
+        }
+        if (!empty($brandVoice['never'])) {
+            $voiceLines[] = "NIEMALS tun: " . implode('; ', (array) $brandVoice['never']);
+        }
+        if ($voiceLines) {
+            $lines[] = "BRAND VOICE (Strategie):\n- " . implode("\n- ", $voiceLines);
         }
 
         // ═══ LAYER 3: ZIEL-LAYER (Kanal, Format, CTA) ═══
