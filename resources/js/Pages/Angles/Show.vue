@@ -148,6 +148,28 @@ const activePost = computed(() => posts.value.find(p => p.id === activePostId.va
 
 function selectPost(p) { activePostId.value = p.id; }
 
+// ─── Quality-Gate-Anzeige ───
+const QUALITY_PASS = 7;
+function qualityClass(score) {
+    if (score >= QUALITY_PASS) return 'bg-green-50 text-green-700 border border-green-300';
+    if (score >= 5) return 'bg-amber-50 text-amber-700 border border-amber-300';
+    return 'bg-red-50 text-red-700 border border-red-300';
+}
+const qualityWarning = computed(() => {
+    const p = activePost.value;
+    if (!p) return '';
+    const f = p.quality_flags || {};
+    const parts = [];
+    if ((f.tone_violations || []).length) parts.push('Tonalitäts-Verstoß: ' + f.tone_violations.join(', '));
+    if (f.missing_cta) parts.push('Pflicht-CTA fehlt');
+    if (f.too_short) parts.push('Text zu kurz fürs Format');
+    if (f.too_long) parts.push('Text zu lang fürs Format');
+    if (p.quality_score !== null && p.quality_score !== undefined && p.quality_score < QUALITY_PASS) {
+        parts.push(`KI-Review nur ${p.quality_score}/10`);
+    }
+    return parts.join(' · ');
+});
+
 async function generateVariants() {
     if (!selectedTemplates.value.length) return;
     generating.value = true;
@@ -396,6 +418,18 @@ onMounted(recommendStatement);
                                 <span class="text-xs font-semibold text-gray-600">{{ formatLabels[activePost.format] }}</span>
                                 <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{{ activePost.variant_pattern }}</span>
                                 <span class="text-xs font-mono text-gray-300">{{ activePost.id }}</span>
+                                <!-- KI-Qualitäts-Score -->
+                                <span v-if="activePost.quality_score !== null && activePost.quality_score !== undefined"
+                                    class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                                    :class="qualityClass(activePost.quality_score)"
+                                    :title="activePost.quality_comment || ''">
+                                    ⭐ {{ activePost.quality_score }}/10
+                                </span>
+                                <span v-if="(activePost.quality_flags?.fix_rounds || 0) > 0"
+                                    class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200"
+                                    :title="'Automatisch korrigiert: ' + (activePost.quality_flags?.fixed_findings || []).join(', ')">
+                                    🔧 {{ activePost.quality_flags.fix_rounds }}× auto-fix
+                                </span>
                             </div>
                             <div class="flex gap-2">
                                 <button @click="dismiss(activePost)" class="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600">Verwerfen</button>
@@ -404,6 +438,15 @@ onMounted(recommendStatement);
                                     {{ activePost.status === 'geplant' ? '✓ In Output' : '→ Zum Output' }}
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- Quality-Gate: Warnungen + Review-Kommentar -->
+                        <div v-if="qualityWarning" class="mb-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+                            ⚠️ <span class="font-medium">Qualitäts-Hinweis:</span> {{ qualityWarning }}
+                            <span v-if="activePost.quality_flags?.fix_rounds" class="text-amber-600">— {{ activePost.quality_flags.fix_rounds }} Auto-Korrektur-Runde(n) liefen bereits; Rest bitte per KI-Überarbeitung unten oder manuell lösen.</span>
+                        </div>
+                        <div v-if="activePost.quality_comment" class="mb-3 text-xs bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3 py-2 leading-relaxed">
+                            <span class="font-semibold">🔍 KI-Review:</span> {{ activePost.quality_comment }}
                         </div>
 
                         <!-- Editor-ähnliche Textarea (automatisch hohe Fläche) -->

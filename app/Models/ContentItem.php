@@ -17,10 +17,13 @@ class ContentItem extends Model
         'content', 'status', 'owner', 'live_date', 'persona_id',
         'icp', 'pain_cluster', 'statement_type',
         'variant_group_id', 'variant_pattern',
+        'quality_score', 'quality_comment', 'quality_flags',
     ];
 
     protected $casts = [
         'live_date' => 'date',
+        'quality_score' => 'integer',
+        'quality_flags' => 'array',
     ];
 
     public const STATUSES = ['idee', 'angle', 'in_produktion', 'review', 'geplant', 'live', 'verworfen'];

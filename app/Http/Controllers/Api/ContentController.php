@@ -20,6 +20,7 @@ class ContentController extends Controller
         private MediaBriefingService $mediaService,
         private \App\Services\LlmService $llm,
         private \App\Services\KpiLearningService $kpiLearning,
+        private \App\Services\ContentQualityService $quality,
     ) {}
 
     /**
@@ -217,14 +218,12 @@ class ContentController extends Controller
             $item = $this->produceSingleContent($angle, $params, $strategy, $strategyCtx, $personaCtx, $groupId, $pattern);
             $items[] = $item;
 
-            // Tone-Verletzungen sammeln (pro Variante)
-            $v = $this->rulesService->checkToneViolations($item->content, $strategy, $strategyCtx);
-            if ($v) {
-                $violations[$item->id] = $v;
+            // Befunde aus dem Quality-Gate (nach Auto-Fix!) für die Response sammeln
+            $flags = $item->quality_flags ?? [];
+            if (!empty($flags['tone_violations'])) {
+                $violations[$item->id] = $flags['tone_violations'];
             }
-
-            // Pflicht-CTA-Check (pro Variante)
-            if (!$this->rulesService->checkMandatoryCta($item->content, $strategy)) {
+            if (!empty($flags['missing_cta'])) {
                 $missingCta[$item->id] = true;
             }
         }
@@ -274,6 +273,9 @@ class ContentController extends Controller
             'variant_group_id' => $groupId,
             'variant_pattern' => $pattern,
         ]);
+
+        // Quality-Gate: Regel-Check → Auto-Fix (max 2 Runden) → LLM-Score → Persistenz
+        $item = $this->quality->gate($item, $strategy, $strategyCtx);
 
         // Auto-create media briefings
         $briefings = $this->mediaService->buildBriefings($params['format'], [
