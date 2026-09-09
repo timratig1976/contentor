@@ -87,6 +87,7 @@ review_agent = Agent(
         model=mc["model"],
         temperature=mc["temperature"],
         max_tokens=mc["max_tokens"],
+        reasoning=mc.get("reasoning", "none"),
         system_prompt=REVIEW_SYSTEM_PROMPT,
     ),
     tools=[list_content, update_content, get_strategy, create_media_briefing],

@@ -76,6 +76,7 @@ production_agent = Agent(
         model=mc["model"],
         temperature=mc["temperature"],
         max_tokens=mc["max_tokens"],
+        reasoning=mc.get("reasoning", "none"),
         system_prompt=PRODUCTION_SYSTEM_PROMPT,
     ),
     tools=[produce_content, list_content, update_content, get_strategy, list_angles, get_batch_ranking],

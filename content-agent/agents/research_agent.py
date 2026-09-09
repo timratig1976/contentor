@@ -66,6 +66,7 @@ research_agent = Agent(
         model=mc["model"],
         temperature=mc["temperature"],
         max_tokens=mc["max_tokens"],
+        reasoning=mc.get("reasoning", "none"),
         system_prompt=RESEARCH_SYSTEM_PROMPT,
     ),
     tools=[web_search, scrape_page, get_strategy_context, create_source, list_sources, create_angle, get_batch_ranking, create_content_idea],

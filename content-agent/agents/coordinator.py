@@ -119,6 +119,7 @@ coordinator = Agent(
         model=mc["model"],
         temperature=mc["temperature"],
         max_tokens=mc["max_tokens"],
+        reasoning=mc.get("reasoning", "none"),
         system_prompt=COORDINATOR_SYSTEM_PROMPT,
     ),
     tools=[research_tool, angle_tool, produce_tool, review_tool],

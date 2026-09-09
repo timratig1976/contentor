@@ -18,7 +18,6 @@ function modelLabel(provider, model) {
 
 const llmKeys = computed(() => props.settings?.llm_keys || {});
 const hasEdenAI = computed(() => !!llmKeys.value?.edenai_key);
-const hasSerperDev = computed(() => !!llmKeys.value?.serperdev_key);
 
 const agents = {
     research: { icon: '🔍', name: 'Research', desc: 'Web-Recherche & Quellen-Extraktion' },
@@ -34,11 +33,11 @@ const prompts = reactive({
     coordinator: props.agentPrompts?.coordinator || '',
 });
 const models = reactive({
-    research: { provider: props.agentModels?.research?.provider || 'openai', model: props.agentModels?.research?.model || 'gpt-4o', temperature: props.agentModels?.research?.temperature ?? 0.7, max_tokens: props.agentModels?.research?.max_tokens || 2000 },
-    angle: { provider: props.agentModels?.angle?.provider || 'openai', model: props.agentModels?.angle?.model || 'gpt-4o', temperature: props.agentModels?.angle?.temperature ?? 0.7, max_tokens: props.agentModels?.angle?.max_tokens || 2000 },
-    production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-3-5-sonnet-20240620', temperature: props.agentModels?.production?.temperature ?? 0.7, max_tokens: props.agentModels?.production?.max_tokens || 1200 },
-    review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o', temperature: props.agentModels?.review?.temperature ?? 0.3, max_tokens: props.agentModels?.review?.max_tokens || 2000 },
-    coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o', temperature: props.agentModels?.coordinator?.temperature ?? 0.7, max_tokens: props.agentModels?.coordinator?.max_tokens || 2000 },
+    research: { provider: props.agentModels?.research?.provider || 'anthropic', model: props.agentModels?.research?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.research?.temperature ?? 0.7, max_tokens: props.agentModels?.research?.max_tokens || 4000, reasoning_effort: props.agentModels?.research?.reasoning_effort || 'medium' },
+    angle: { provider: props.agentModels?.angle?.provider || 'anthropic', model: props.agentModels?.angle?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.angle?.temperature ?? 0.5, max_tokens: props.agentModels?.angle?.max_tokens || 8000, reasoning_effort: props.agentModels?.angle?.reasoning_effort || 'medium' },
+    production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.production?.temperature ?? 0.8, max_tokens: props.agentModels?.production?.max_tokens || 4000, reasoning_effort: props.agentModels?.production?.reasoning_effort || 'medium' },
+    review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o', temperature: props.agentModels?.review?.temperature ?? 0.3, max_tokens: props.agentModels?.review?.max_tokens || 3000, reasoning_effort: props.agentModels?.review?.reasoning_effort || 'low' },
+    coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o', temperature: props.agentModels?.coordinator?.temperature ?? 0.7, max_tokens: props.agentModels?.coordinator?.max_tokens || 3000, reasoning_effort: props.agentModels?.coordinator?.reasoning_effort || 'low' },
 });
 
 // ─── Workflow & Loops ───────────────────────────────────────────────────
@@ -316,7 +315,6 @@ onMounted(() => { loadWorkflowRuns(); });
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-xs px-2 py-1 rounded-full" :class="hasEdenAI ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'">EdenAI {{ hasEdenAI ? '✓' : '✗' }}</span>
-                    <span class="text-xs px-2 py-1 rounded-full" :class="hasSerperDev ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'">SerperDev {{ hasSerperDev ? '✓' : '✗' }}</span>
                 </div>
             </div>
 
@@ -547,8 +545,25 @@ onMounted(() => { loadWorkflowRuns(); });
                         </div>
                         <div>
                             <label class="block text-xs text-gray-400 mb-1">Max Tokens</label>
-                            <input type="number" step="100" min="100" max="8000" v-model.number="models[activeAgent].max_tokens"
-                                class="w-full bg-neu rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400" placeholder="1200">
+                            <input type="number" step="100" min="100" max="64000" v-model.number="models[activeAgent].max_tokens"
+                                class="w-full bg-neu rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400" placeholder="2000">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Reasoning Aufwand</label>
+                            <select v-model="models[activeAgent].reasoning_effort" class="w-full bg-neu rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400">
+                                <option value="none">Aus (Default des Modells)</option>
+                                <option value="low">Niedrig — schnell & günstig</option>
+                                <option value="medium">Mittel — ausgewogen</option>
+                                <option value="high">Hoch — tiefgründig & teuer</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <p class="text-[11px] text-gray-400 leading-snug pb-1">
+                                Steuert wie viel das Modell intern nachdenkt (Claude: <code>output_config.effort</code>, OpenAI o-Serie/gpt-5: <code>reasoning_effort</code>).
+                                Niedrig = schneller &amp; günstiger; bei einfachen Schreib-Formaten reicht meist <em>mittel</em>.
+                            </p>
                         </div>
                     </div>
                     <div class="mt-4 p-3 neu-card-sm">

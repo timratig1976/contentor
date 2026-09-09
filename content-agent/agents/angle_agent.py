@@ -61,6 +61,7 @@ angle_agent = Agent(
         model=mc["model"],
         temperature=mc["temperature"],
         max_tokens=mc["max_tokens"],
+        reasoning=mc.get("reasoning", "none"),
         system_prompt=ANGLE_SYSTEM_PROMPT,
     ),
     tools=[get_strategy, list_angles, update_angle, create_angle, get_batch_ranking],

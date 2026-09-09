@@ -18,6 +18,7 @@ class ContentController extends Controller
     public function __construct(
         private ContentRulesService $rulesService,
         private MediaBriefingService $mediaService,
+        private \App\Services\LlmService $llm,
     ) {}
 
     /**
@@ -126,7 +127,7 @@ class ContentController extends Controller
     {
         $validated = $request->validate([
             'angle_id' => 'required|string|exists:angles,id',
-            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk',
+            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk,blog_post',
             'pattern' => 'nullable|string|in:contrarian_take,data_drop,mistake_post,framework',
             'persona_id' => 'nullable|string|exists:personas,id',
             'metric' => 'nullable|string',
@@ -322,66 +323,33 @@ class ContentController extends Controller
             'apply' => 'sometimes|boolean', // true = sofort speichern, false = nur Vorschlag
         ]);
 
-        $edenaiKey = \App\Models\Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
-        if (! $edenaiKey) {
-            return response()->json(['error' => 'EdenAI Key nicht konfiguriert.'], 422);
-        }
-
-        $strategy = $contentItem->strategy;
-
         $prompt = "Überarbeite folgenden Content-Post im Format \"{$contentItem->format}\".\n\n"
             . "AKTUELLER CONTENT:\n```\n{$contentItem->content}\n```\n\n"
             . "ANWEISUNG DES NUTZERS:\n{$validated['instruction']}\n\n"
             . "Behalte Format, Länge und Stil bei. Gib NUR den fertigen überarbeiteten Text aus "
             . "(keine Erklärungen, keine Meta-Kommentare).";
 
-        $start = microtime(true);
-        try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => 'Bearer ' . $edenaiKey,
-                'Content-Type' => 'application/json',
-            ])->timeout(90)->post('https://api.edenai.run/v3/chat/completions', [
-                'model' => 'openai/gpt-4o',
-                'messages' => [
-                    ['role' => 'system', 'content' => 'Du bist ein B2B-Content-Redakteur.'],
-                    ['role' => 'user', 'content' => $prompt],
-                ],
-                'temperature' => 0.6,
-                'max_tokens' => 1500,
-            ]);
+        $result = $this->llm->chat('assistant', 'Du bist ein B2B-Content-Redakteur.', [
+            ['role' => 'user', 'content' => $prompt],
+        ], ['timeout' => 90]);
 
-            $text = $response->json('choices.0.message.content');
-
-            \App\Models\AgentLog::create([
-                'agent'       => 'assistant',
-                'provider'    => 'edenai/openai',
-                'model'       => 'openai/gpt-4o',
-                'input'       => substr($validated['instruction'], 0, 2000),
-                'output'      => substr($text ?? '', 0, 2000),
-                'status'      => $text ? 'success' : 'error',
-                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
-            ]);
-
-            if (! $text || strlen(trim($text)) < 20) {
-                return response()->json(['error' => 'Keine brauchbare Antwort vom Modell.'], 502);
-            }
-
-            $text = trim($text);
-
-            $applied = false;
-            if ($validated['apply'] ?? true) {
-                $contentItem->update(['content' => $text, 'status' => 'review']);
-                $applied = true;
-            }
-
-            return response()->json([
-                'content_item' => $contentItem->fresh()->load(['strategy', 'angle', 'media']),
-                'suggested' => $text,
-                'applied' => $applied,
-            ]);
-        } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 502);
+        if ($result['status'] !== 'success' || ! $result['text'] || strlen(trim($result['text'])) < 20) {
+            return response()->json(['error' => $result['error'] ?? 'Keine brauchbare Antwort vom Modell.'], 502);
         }
+
+        $text = trim($result['text']);
+
+        $applied = false;
+        if ($validated['apply'] ?? true) {
+            $contentItem->update(['content' => $text, 'status' => 'review']);
+            $applied = true;
+        }
+
+        return response()->json([
+            'content_item' => $contentItem->fresh()->load(['strategy', 'angle', 'media']),
+            'suggested' => $text,
+            'applied' => $applied,
+        ]);
     }
 
     /**
@@ -464,25 +432,11 @@ class ContentController extends Controller
      */
     private function generateContentWithLLM(Angle $angle, array $params, Strategy $strategy, array $strategyCtx, ?array $personaCtx): string
     {
-        $edenaiKey = \App\Models\Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
         $format = $params['format'];
         $pattern = $params['pattern'] ?? null;
 
-        if (!$edenaiKey) {
-            return $this->generateContent($angle, $params, $strategyCtx, $personaCtx);
-        }
-
-        // Konfiguration des Production-Agents (Agents-Seite → Modell/Prompt)
-        $agentModels  = \App\Models\Setting::where('key', 'agent_models')->first()?->value ?? [];
+        // Konfiguration des Production-Agents (Agents-Seite → Modell/Prompt/Effort)
         $agentPrompts = \App\Models\Setting::where('key', 'agent_prompts')->first()?->value ?? [];
-        $prodCfg = $agentModels['production'] ?? [];
-
-        $provider = $prodCfg['provider'] ?? 'openai';
-        $rawModel = $prodCfg['model'] ?? 'gpt-4o';
-        $model = str_starts_with($rawModel, $provider . '/') ? $rawModel : $provider . '/' . $rawModel;
-
-        $temperature = (float) ($prodCfg['temperature'] ?? 0.7);
-        $maxTokens   = (int) ($prodCfg['max_tokens'] ?? 1200);
 
         $systemPrompt = $agentPrompts['production']
             ?? 'Du bist ein B2B-Content-Texter. Schreibe NUR den fertigen Content-Text, keine Erklärungen, keine Meta-Kommentare.';
@@ -502,57 +456,16 @@ class ContentController extends Controller
 
         $prompt = $this->buildContentPrompt($angle, $params, $format, $template, $channelRules, $brandVoice, $personaCtx, $strategy);
 
-        $start = microtime(true);
-        try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Authorization' => 'Bearer ' . $edenaiKey,
-                'Content-Type' => 'application/json',
-            ])->timeout(90)->post('https://api.edenai.run/v3/chat/completions', [
-                'model' => $model,
-                'messages' => [
-                    ['role' => 'system', 'content' => $systemPrompt],
-                    ['role' => 'user', 'content' => $prompt],
-                ],
-                'temperature' => $temperature,
-                'max_tokens' => $maxTokens,
-            ]);
+        // Zentraler LLM-Call über LlmService (inkl. Reasoning-Effort & Logging)
+        $result = $this->llm->chat('production', $systemPrompt, [
+            ['role' => 'user', 'content' => $prompt],
+        ], ['timeout' => 90]);
 
-            $text = $response->json('choices.0.message.content');
-
-            // HTTP-Fehler von EdenAI (400/401/404 …) explizit loggen statt stiller Fallback
-            if ($response->failed()) {
-                $err = $response->json('error.message') ?? $response->json('message') ?? $response->body();
-                throw new \RuntimeException('EdenAI HTTP ' . $response->status() . ': ' . (is_string($err) ? $err : json_encode($err)));
-            }
-
-            // Kosten-Tracking: jeder LLM-Call wird geloggt (auch Fehlschläge)
-            \App\Models\AgentLog::create([
-                'agent'       => 'production',
-                'provider'    => $provider,
-                'model'       => $model,
-                'input'       => substr($prompt, 0, 2000),
-                'output'      => substr($text ?? '', 0, 2000),
-                'status'      => $text ? 'success' : 'error',
-                'tokens_used' => $response->json('usage.total_tokens'),
-                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
-            ]);
-
-            if ($text && strlen(trim($text)) > 20) {
-                return trim($text);
-            }
-        } catch (\Throwable $e) {
-            \App\Models\AgentLog::create([
-                'agent'       => 'production',
-                'provider'    => $provider,
-                'model'       => $model,
-                'input'       => substr($prompt, 0, 2000),
-                'output'      => substr('Exception: ' . $e->getMessage(), 0, 2000),
-                'status'      => 'error',
-                'duration_ms' => (int) ((microtime(true) - $start) * 1000),
-            ]);
-            // Fallback unten
+        if ($result['status'] === 'success' && $result['text'] && strlen(trim($result['text'])) > 20) {
+            return trim($result['text']);
         }
 
+        // Fallback: deterministischer Builder
         return $this->generateContent($angle, $params, $strategyCtx, $personaCtx);
     }
 

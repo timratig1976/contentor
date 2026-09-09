@@ -13,7 +13,7 @@ class AssistantController extends Controller
     /**
      * AI-Assistant: Chat-Endpoint mit Tool-Calling für Strategie-Erstellung.
      */
-    public function chat(Request $request): JsonResponse
+    public function chat(Request $request, \App\Services\LlmService $llm): JsonResponse
     {
         $validated = $request->validate([
             'message' => 'required|string',
@@ -30,30 +30,28 @@ class AssistantController extends Controller
         $messages = $validated['history'] ?? [];
         $messages[] = ['role' => 'user', 'message' => $validated['message']];
 
-        // Build EdenAI chat history
-        $history = [];
-        foreach (array_slice($messages, -10) as $msg) {
-            $history[] = ['role' => $msg['role'] === 'user' ? 'user' : 'assistant', 'message' => $msg['message']];
+        // Chat-History für den LLM-Call aufbereiten (letzte 10 Nachrichten)
+        $chatMessages = [];
+        foreach (array_slice($messages, -11, -1) as $msg) {
+            $chatMessages[] = [
+                'role' => ($msg['role'] ?? 'user') === 'user' ? 'user' : 'assistant',
+                'content' => $msg['message'] ?? '',
+            ];
+        }
+        $chatMessages[] = ['role' => 'user', 'content' => $validated['message']];
+
+        // v3 Chat Completions über den zentralen LlmService (statt Legacy-v2)
+        $result = $llm->chat('assistant', $systemPrompt, $chatMessages, ['timeout' => 120]);
+
+        if ($result['status'] !== 'success') {
+            return response()->json([
+                'reply' => 'Fehler: ' . ($result['error'] ?? 'Keine Antwort erhalten.'),
+                'history' => $messages,
+            ], 502);
         }
 
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $edenaiKey,
-            'Content-Type' => 'application/json',
-        ])->timeout(120)->post('https://api.edenai.run/v2/text/chat', [
-            'providers' => 'openai',
-            'model' => 'gpt-4o',
-            'text' => $validated['message'],
-            'chatbot_global_action' => $systemPrompt,
-            'previous_history' => array_slice($history, 0, -1),
-            'temperature' => 0.7,
-            'max_tokens' => 2000,
-        ]);
-
-        $data = $response->json();
-        $reply = $data['openai']['generated_text'] ?? 'Keine Antwort erhalten.';
-
         return response()->json([
-            'reply' => $reply,
+            'reply' => $result['text'],
             'history' => $messages,
         ]);
     }
