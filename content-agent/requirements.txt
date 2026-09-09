@@ -1,4 +1,3 @@
 haystack-ai>=3.0
-serperdev-haystack
 python-dotenv
 httpx

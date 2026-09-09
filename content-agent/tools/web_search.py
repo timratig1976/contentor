@@ -1,14 +1,13 @@
 """
 Web-Tools für den Research-Agenten.
 
-Primär: EdenAI Universal-AI mit Firecrawl (web/search + web/scraping) —
-benötigt nur den EdenAI-Key, ersetzt SerperDev komplett.
-Fallback: SerperDev (falls EDENAI_API_KEY fehlt, aber ein Serper-Key gesetzt ist).
+Web-Suche über EdenAI Universal-AI mit Firecrawl (web/search + web/scraping) —
+benötigt nur den EdenAI-Key. (SerperDev-Fallback entfernt — EdenAI ersetzt ihn.)
 """
 import httpx
 from haystack.tools import tool
 
-from config import EDENAI_API_KEY, SERPERDEV_API_KEY
+from config import EDENAI_API_KEY
 
 EDENAI_BASE = "https://api.edenai.run/v3/universal-ai/"
 
@@ -41,22 +40,6 @@ def _edenai_search(query: str, limit: int) -> dict | None:
     return {"results": results}
 
 
-def _serperdev_search(query: str, limit: int) -> dict:
-    """Fallback-Suche über SerperDev (haystack-Integration)."""
-    from haystack_integrations.components.websearch.serperdev import SerperDevWebSearch
-
-    component = SerperDevWebSearch(top_k=limit)
-    out = component.run(query)
-    results = []
-    for doc in out.get("documents", []):
-        results.append({
-            "title": doc.meta.get("title"),
-            "url": doc.meta.get("link"),
-            "description": doc.content,
-        })
-    return {"results": results}
-
-
 @tool
 def web_search(query: str, limit: int = 5) -> dict:
     """Durchsuche das Web nach aktuellen Informationen, Artikeln, Studien und News
@@ -69,9 +52,7 @@ def web_search(query: str, limit: int = 5) -> dict:
     edenai = _edenai_search(query, limit)
     if edenai is not None:
         return edenai
-    if SERPERDEV_API_KEY:
-        return _serperdev_search(query, limit)
-    return {"results": [], "error": "Kein Web-Search konfiguriert (braucht EdenAI- oder SerperDev-Key)."}
+    return {"results": [], "error": "Kein Web-Search konfiguriert (EdenAI-Key fehlt)."}
 
 
 @tool

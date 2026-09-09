@@ -10,7 +10,6 @@ const props = defineProps({ settings: Object });
 
 const keys = reactive({
     edenai_key: props.settings?.llm_keys?.edenai_key || '',
-    serperdev_key: props.settings?.llm_keys?.serperdev_key || '',
     content_api_url: props.settings?.llm_keys?.content_api_url || 'http://localhost:8000/api',
 });
 
@@ -98,8 +97,7 @@ function toggleAll(provider, enabled) {
 
     <UCard title="🔑 API Keys" class="mb-6">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <UInput v-model="keys.edenai_key" label="EdenAI API Key" type="password" hint="Alle Modelle über einen Key" />
-        <UInput v-model="keys.serperdev_key" label="SerperDev API Key" type="password" hint="Für Web-Recherche" />
+        <UInput v-model="keys.edenai_key" label="EdenAI API Key" type="password" hint="Alle Modelle & Web-Recherche über einen Key" />
         <UInput v-model="keys.content_api_url" label="Content API URL" class="md:col-span-2" hint="Laravel API-Endpunkt" />
       </div>
       <div class="mt-4">
