@@ -65,6 +65,9 @@ Route::delete('/strategy/{unit}/{key}', [StrategyController::class, 'destroy']);
 // Medien
 Route::post('/media/briefing', [MediaController::class, 'storeBriefing']);
 Route::post('/media/generieren', [MediaController::class, 'generieren']);
+Route::post('/media/{contentItem}/brief-ideas', [MediaController::class, 'briefIdeas']);
+Route::post('/media/generate-image', [MediaController::class, 'generateImage']);
+Route::get('/media/gallery', [MediaController::class, 'gallery']);
 Route::patch('/media/{media}', [MediaController::class, 'update']);
 Route::delete('/media/{media}', [MediaController::class, 'destroy']);
 Route::get('/media', [MediaController::class, 'index']);

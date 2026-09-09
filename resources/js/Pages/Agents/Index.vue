@@ -244,6 +244,17 @@ function logCount(agent) {
     return (props.agentLogs || []).filter(l => names.includes(l.agent)).length;
 }
 
+// Globale Aktivitäts-Logs mit Filtern
+const logFilterAgent = ref('');
+const logFilterStatus = ref('');
+const logAgentTypes = computed(() => [...new Set((props.agentLogs || []).map(l => l.agent))].sort());
+const filteredAllLogs = computed(() => {
+    return (props.agentLogs || []).filter(l =>
+        (!logFilterAgent.value || l.agent === logFilterAgent.value) &&
+        (!logFilterStatus.value || l.status === logFilterStatus.value)
+    ).slice(0, 50);
+});
+
 // Aufgeklappte Log-Einträge (Details nur per Klick)
 const expandedLogs = ref(new Set());
 function toggleLog(id) {
@@ -486,6 +497,49 @@ onMounted(() => { loadWorkflowRuns(); });
                             </button>
                         </div>
                         <pre class="bg-neu text-gray-800 text-xs rounded-lg p-4 whitespace-pre-wrap leading-relaxed">{{ workflowText }}</pre>
+                    </div>
+                </div>
+
+                <!-- Globale Aktivitäts-Logs: ALLE LLM-Calls (Agents, Quality-Gate, Bild-Generierung, Assistant) -->
+                <div class="neu-card p-5 mt-6">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-medium text-gray-800">🗂️ Alle Aktivitäten (LLM-Logs)</h3>
+                        <div class="flex items-center gap-2">
+                            <select v-model="logFilterAgent" class="bg-neu text-xs border-0 rounded-lg px-2 py-1.5 text-gray-700">
+                                <option value="">Alle Typen</option>
+                                <option v-for="a in logAgentTypes" :key="a" :value="a">{{ a }}</option>
+                            </select>
+                            <select v-model="logFilterStatus" class="bg-neu text-xs border-0 rounded-lg px-2 py-1.5 text-gray-700">
+                                <option value="">Alle Status</option>
+                                <option value="success">✓ success</option>
+                                <option value="error">✗ error</option>
+                            </select>
+                            <button @click="router.reload({ only: ['agentLogs'] })" class="text-xs text-gray-400 hover:text-gray-700" title="Aktualisieren">↻</button>
+                        </div>
+                    </div>
+                    <div class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                        <div v-for="log in filteredAllLogs" :key="log.id">
+                            <button @click="toggleLog(log.id)" class="w-full flex items-center gap-3 py-2 text-left hover:bg-gray-50 rounded px-2 -mx-2">
+                                <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="log.status === 'success' ? 'bg-green-500' : 'bg-red-500'"></span>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0">{{ log.agent }}</span>
+                                <span class="text-xs text-gray-400 shrink-0 w-24">{{ new Date(log.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
+                                <span class="text-xs text-gray-800 truncate flex-1">{{ log.input }}</span>
+                                <span v-if="log.duration_ms" class="text-xs text-gray-400 shrink-0 hidden sm:inline">{{ (log.duration_ms / 1000).toFixed(1) }}s</span>
+                                <span class="text-gray-300 text-xs shrink-0 transition-transform" :class="expandedLogs.has(log.id) ? 'rotate-90' : ''">▸</span>
+                            </button>
+                            <div v-if="expandedLogs.has(log.id)" class="ml-4 mr-2 mb-3 mt-1 space-y-2 border-l-2 border-gray-100 pl-3">
+                                <div>
+                                    <p class="text-xs text-gray-400 mb-0.5">Input</p>
+                                    <p class="text-xs text-gray-800 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ log.input }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-400 mb-0.5">Output</p>
+                                    <p class="text-xs text-gray-800 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ log.output }}</p>
+                                </div>
+                                <p class="text-xs text-gray-400">{{ modelLabel(log.provider, log.model) }} · {{ log.status }}<span v-if="log.tokens_used"> · {{ log.tokens_used }} Tokens</span></p>
+                            </div>
+                        </div>
+                        <p v-if="!filteredAllLogs.length" class="text-xs text-gray-400 italic py-3">Keine Einträge für diese Filter.</p>
                     </div>
                 </div>
             </div>

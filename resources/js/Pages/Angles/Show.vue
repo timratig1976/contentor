@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -155,6 +155,7 @@ onMounted(() => {
     if (existing.length) {
         posts.value = existing;
         activePostId.value = existing[existing.length - 1].id; // zuletzt erzeugt
+        loadExistingImages();
     }
 });
 
@@ -310,6 +311,63 @@ function editProposalManually() {
     activePost.value.content = editProposal.value.after;
     editProposal.value = null;
 }
+
+// ─── Bild-Pipeline: Ideen aus dem finalen Content → Auswahl → Generieren ───
+const imageIdeas = ref([]);
+const imageIdeasLoading = ref(false);
+const imageGenLoading = ref(false);
+const imageGenError = ref('');
+const imageGenElapsed = ref(0);
+let imageTimer = null;
+const generatedImages = ref([]); // { id, url, title }
+const selectedIdea = ref(null);
+
+async function requestImageIdeas() {
+    if (!activePost.value) return;
+    imageIdeasLoading.value = true;
+    imageGenError.value = '';
+    try {
+        const res = await fetch(`/api/media/${activePost.value.id}/brief-ideas`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { imageGenError.value = data?.error || data?.message || `HTTP ${res.status}`; return; }
+        imageIdeas.value = data.ideas || [];
+    } catch (e) { imageGenError.value = 'Netzwerkfehler: ' + e.message; }
+    imageIdeasLoading.value = false;
+}
+
+async function generateFromIdea(idea) {
+    if (!activePost.value || imageGenLoading.value) return;
+    selectedIdea.value = idea;
+    imageGenLoading.value = true;
+    imageGenError.value = '';
+    imageGenElapsed.value = 0;
+    imageTimer = setInterval(() => imageGenElapsed.value++, 1000);
+    try {
+        const res = await fetch('/api/media/generate-image', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body: JSON.stringify({
+                item_id: activePost.value.id,
+                prompt: idea.prompt,
+                title: idea.title,
+                concept: idea.concept,
+            }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { imageGenError.value = data?.error || data?.message || `HTTP ${res.status}`; return; }
+        generatedImages.value.push({ id: data.media.id, url: data.media.url, title: idea.title });
+    } catch (e) { imageGenError.value = 'Netzwerkfehler: ' + e.message; }
+    clearInterval(imageTimer); imageTimer = null;
+    imageGenLoading.value = false;
+}
+
+function loadExistingImages() {
+    const media = activePost.value?.media || [];
+    generatedImages.value = media.filter(m => m.type === 'image' && m.url)
+        .map(m => ({ id: m.id, url: m.url, title: m.briefing?.idea_title || 'Bild' }));
+}
+watch(activePostId, () => { imageIdeas.value = []; selectedIdea.value = null; imageGenError.value = ''; loadExistingImages(); });
 
 // Manuelles Editieren (direkt im Textarea) → speichern
 async function saveManualEdit() {
@@ -534,6 +592,49 @@ onMounted(recommendStatement);
                                 </div>
                             </div>
                             <p v-if="editError" class="mt-2 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">⚠️ {{ editError }}</p>
+                        </div>
+
+                        <!-- Bild-Pipeline: Ideen → Auswahl → Generieren -->
+                        <div class="mt-4 border-t border-gray-100 pt-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <p class="text-xs text-gray-500 font-medium">🎨 Passendes Bild <span class="text-gray-400 font-normal">— Ideen aus dem finalen Text, du wählst</span></p>
+                                <button @click="requestImageIdeas" :disabled="imageIdeasLoading || imageGenLoading"
+                                    class="text-xs px-2.5 py-1 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+                                    {{ imageIdeasLoading ? 'Ideen kommen…' : (imageIdeas.length ? '↻ Neue Ideen' : '💡 Bildideen entwickeln') }}
+                                </button>
+                            </div>
+
+                            <!-- Bereits generierte Bilder -->
+                            <div v-if="generatedImages.length" class="flex gap-2 mb-2 flex-wrap">
+                                <div v-for="img in generatedImages" :key="img.id" class="relative group">
+                                    <a :href="img.url" target="_blank" rel="noopener">
+                                        <img :src="img.url" :alt="img.title" class="w-28 h-16 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-90" :title="img.title" />
+                                        <span class="absolute bottom-0.5 left-0.5 right-0.5 text-[9px] text-white bg-black/50 rounded-b-lg px-1 truncate">{{ img.title }}</span>
+                                    </a>
+                                </div>
+                            </div>
+
+                            <!-- Ideen-Auswahl -->
+                            <div v-if="imageIdeas.length" class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <div v-for="(idea, i) in imageIdeas" :key="i"
+                                    class="border rounded-lg p-2.5 flex flex-col"
+                                    :class="selectedIdea?.title === idea.title ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200' : 'border-gray-200 bg-white'">
+                                    <p class="text-xs font-semibold text-gray-800 mb-1">{{ i + 1 }}. {{ idea.title }}</p>
+                                    <p class="text-[11px] text-gray-500 leading-snug mb-1 flex-1">{{ idea.concept }}</p>
+                                    <p class="text-[10px] text-purple-600 mb-2">🎭 {{ idea.mood }}</p>
+                                    <button @click="generateFromIdea(idea)" :disabled="imageGenLoading"
+                                        class="text-[11px] px-2 py-1 rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+                                        {{ imageGenLoading && selectedIdea?.title === idea.title ? '🎨 Erzeuge… ' + imageGenElapsed + 's' : '🎨 Bild generieren' }}
+                                    </button>
+                                </div>
+                            </div>
+                            <div v-if="imageGenLoading" class="mt-2">
+                                <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div class="h-full bg-purple-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (imageGenElapsed / 25) * 100) + '%' }"></div>
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-1">Bildgenerierung dauert ~5–25s (Gemini Image). Kosten pro Bild ≈ $0.04.</p>
+                            </div>
+                            <p v-if="imageGenError" class="mt-2 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">⚠️ {{ imageGenError }}</p>
                         </div>
                     </div>
                 </template>

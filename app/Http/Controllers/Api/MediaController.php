@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ContentItem;
 use App\Models\ContentMedia;
 use App\Models\Strategy;
+use App\Services\ImageGenerationService;
 use App\Services\MediaBriefingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,74 @@ class MediaController extends Controller
 {
     public function __construct(
         private MediaBriefingService $mediaService,
+        private ImageGenerationService $imageService,
     ) {}
+
+    /**
+     * Bildideen für einen existierenden Post ableiten (Stufe 1 der Bild-Pipeline).
+     * Der Nutzer wählt danach eine Idee → generateFromIdea().
+     */
+    public function briefIdeas(Request $request, ContentItem $contentItem): JsonResponse
+    {
+        $result = $this->imageService->briefIdeas($contentItem);
+
+        if ($result['error']) {
+            return response()->json(['error' => $result['error'], 'ideas' => []], 502);
+        }
+
+        return response()->json([
+            'ideas' => $result['ideas'],
+            'content_item_id' => $contentItem->id,
+        ]);
+    }
+
+    /**
+     * Bild aus gewählter Idee/Prompt generieren (Stufe 2) — Base64 von
+     * Gemini wird als PNG in storage/app/public/media gespeichert.
+     */
+    public function generateImage(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'item_id' => 'required|string|exists:content_items,id',
+            'prompt' => 'required|string|max:3000',
+            'title' => 'nullable|string|max:255',
+            'concept' => 'nullable|string|max:1000',
+            'style' => 'nullable|string|max:255',
+            'aspect_ratio' => 'nullable|string|max:20',
+            'position' => 'nullable|integer|min:0',
+        ]);
+
+        $item = ContentItem::with('strategy')->findOrFail($validated['item_id']);
+
+        $result = $this->imageService->generate($item, $validated['prompt'], [
+            'title' => $validated['title'] ?? null,
+            'concept' => $validated['concept'] ?? null,
+            'style' => $validated['style'] ?? null,
+            'aspect_ratio' => $validated['aspect_ratio'] ?? null,
+            'position' => $validated['position'] ?? 0,
+        ]);
+
+        if ($result['error']) {
+            return response()->json(['error' => $result['error']], 502);
+        }
+
+        return response()->json([
+            'media' => $result['media']->load('contentItem:id,title,format'),
+            'message' => 'Bild generiert und gespeichert.',
+        ], 201);
+    }
+
+    /**
+     * Galerie aller generierten Bilder einer Strategie.
+     */
+    public function gallery(Request $request): JsonResponse
+    {
+        $strategy = $request->filled('strategy')
+            ? Strategy::where('key', $request->input('strategy'))->first()
+            : null;
+
+        return response()->json($this->imageService->gallery($strategy));
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -75,16 +143,35 @@ class MediaController extends Controller
 
         $media = ContentMedia::with('contentItem')->findOrFail($validated['media_id']);
 
-        // Placeholder: In production, this triggers image generation via fal.ai or similar
-        // For now, mark as "generiert" with a placeholder URL
-        $media->update([
-            'status' => 'generiert',
-            'url' => 'https://placeholder.viminds.de/media/' . $media->id,
+        // Echte Generierung über das gespeicherte Briefing (prompt_hint)
+        $prompt = $media->briefing['prompt_hint'] ?? null;
+        if (! $prompt) {
+            return response()->json(['error' => 'Kein Prompt im Briefing hinterlegt.'], 422);
+        }
+
+        $result = $this->imageService->generate($media->contentItem, $prompt, [
+            'title' => $media->briefing['idea_title'] ?? null,
+            'concept' => $media->briefing['idea_concept'] ?? null,
+            'style' => $media->briefing['generation_params']['style'] ?? null,
+            'aspect_ratio' => $media->format,
+            'position' => $media->position,
         ]);
 
+        if ($result['error']) {
+            return response()->json(['error' => $result['error']], 502);
+        }
+
+        // Ursprüngliches Briefing-Element mit dem Ergebnis verknüpfen
+        $media->update([
+            'status' => 'generiert',
+            'url' => $result['media']->url,
+            'briefing' => array_merge($media->briefing ?? [], $result['media']->briefing ?? []),
+        ]);
+        $result['media']->delete(); // Duplikat entfernen — Briefing-Record ist der kanonische
+
         return response()->json([
-            'message' => "Media {$media->id} generiert (placeholder).",
-            'media' => $media,
+            'message' => "Media {$media->id} generiert.",
+            'media' => $media->fresh(),
         ]);
     }
 
