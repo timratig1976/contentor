@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -151,6 +151,8 @@ function selectPost(p) { activePostId.value = p.id; }
 async function generateVariants() {
     if (!selectedTemplates.value.length) return;
     generating.value = true;
+    generateError.value = '';
+    startTimer();
     const patterns = selectedTemplates.value.map(patternFor);
     try {
         const res = await fetch('/api/content/produzieren', {
@@ -161,14 +163,41 @@ async function generateVariants() {
                 variants_count: selectedTemplates.value.length, variant_patterns: patterns,
             }),
         });
-        const data = await res.json();
-        if (data.items) {
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.items) {
+            // Fehler explizit anzeigen statt still zu scheitern
+            const msg = data?.message || data?.error || `HTTP ${res.status}`;
+            generateError.value = typeof msg === 'string' ? msg : JSON.stringify(msg);
+        } else {
             posts.value = data.items;
             activePostId.value = data.items[0]?.id || null;
         }
-    } catch (e) { alert('Fehler: ' + e.message); }
+    } catch (e) {
+        generateError.value = 'Netzwerkfehler: ' + e.message;
+    }
+    stopTimer();
     generating.value = false;
 }
+
+// ─── Echtzeit-Status während der Generierung ───
+const elapsed = ref(0);
+const generateError = ref('');
+let timerInterval = null;
+function startTimer() {
+    elapsed.value = 0;
+    timerInterval = setInterval(() => elapsed.value++, 1000);
+}
+function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
+onUnmounted(stopTimer);
+
+// Erwartete Dauer: ~30–90s pro Variante je nach Reasoning-Effort
+const progressWidth = computed(() => Math.min(97, (elapsed.value / 90) * 100).toFixed(0) + '%');
+const generatingHint = computed(() => {
+    if (elapsed.value < 15) return 'KI schreibt…';
+    if (elapsed.value < 40) return 'KI schreibt noch (Reasoning-Modelle brauchen Zeit)…';
+    if (elapsed.value < 90) return 'Gleich fertig — längerer Text oder hohes Reasoning…';
+    return 'Dauert ungewöhnlich lang — bitte warten oder Reasoning-Effort senken.';
+});
 
 // ─── Editor-Aktionen ───
 const editInstruction = ref('');
@@ -402,9 +431,19 @@ onMounted(recommendStatement);
                     <p v-if="!filteredTemplates.length" class="text-[11px] text-gray-400 italic py-1">Keine Templates.</p>
                 </div>
 
+                <p v-if="generateError" class="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">⚠️ {{ generateError }}</p>
+                <div v-if="generating" class="mb-2">
+                    <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+                        <span>{{ generatingHint }}</span>
+                        <span class="font-mono tabular-nums">{{ elapsed }}s</span>
+                    </div>
+                    <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                        <div class="h-full bg-green-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: progressWidth }"></div>
+                    </div>
+                </div>
                 <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
                     class="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium disabled:opacity-50">
-                    {{ generating ? 'Generiere…' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
+                    {{ generating ? 'Generiere… ' + elapsed + 's' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
                 </button>
             </div>
         </div>
