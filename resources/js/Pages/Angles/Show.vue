@@ -80,13 +80,39 @@ const formatDesc = {
     blog_post: 'Einleitung, Absätze, Fazit.',
 };
 
+// Fallback-Templates für Formate, die keine eigenen Template-Definitionen haben
+const defaultTemplatesForFormat = {
+    blog_post: [
+        { name: 'Classic Blog Post', format: 'blog_post', description: 'Einleitung → 3 Absätze → Fazit mit CTA', pattern: 'framework' },
+        { name: 'Problem-Lösung Blog', format: 'blog_post', description: 'Problem aufzeigen → Lösung erklären → CTA', pattern: 'question' },
+        { name: 'Storytelling Blog', format: 'blog_post', description: 'Anekdote als Aufhänger → Learnings → Fazit', pattern: 'story' },
+    ],
+    ad_copy: [
+        { name: 'Direct Response Ad', format: 'ad_copy', description: 'Pain → Versprechen → CTA', pattern: 'contrarian' },
+        { name: 'Data-Driven Ad', format: 'ad_copy', description: 'Zahl als Hook → Nutzen → CTA', pattern: 'data_drop' },
+    ],
+    newsletter_acquisition: [
+        { name: 'Acquisition Newsletter', format: 'newsletter_acquisition', description: 'Betreff → Problem → Lösung → CTA', pattern: 'question' },
+    ],
+    newsletter_bk: [
+        { name: 'Bestandskunden Newsletter', format: 'newsletter_bk', description: 'Persönlich → 1-2 Punkte → Next Step', pattern: 'story' },
+    ],
+    landing_page_headlines: [
+        { name: 'Hero Headline Set', format: 'landing_page_headlines', description: 'Hero → Sub → Bullets → CTA', pattern: 'framework' },
+    ],
+};
+
 const availableFormats = computed(() => {
     const fmts = new Set((props.templates || []).map(t => t.format));
+    Object.keys(defaultTemplatesForFormat).forEach(f => fmts.add(f));
     if (!fmts.has('linkedin_post')) fmts.add('linkedin_post');
-    if (!fmts.has('blog_post')) fmts.add('blog_post');
     return [...fmts];
 });
-const filteredTemplates = computed(() => (props.templates || []).filter(t => t.format === activeFormat.value));
+
+const filteredTemplates = computed(() => {
+    const stored = (props.templates || []).filter(t => t.format === activeFormat.value);
+    return stored.length ? stored : (defaultTemplatesForFormat[activeFormat.value] || []);
+});
 
 function selectFormat(fmt) { activeFormat.value = fmt; selectedTemplates.value = []; recommendStatement(); }
 function toggleTemplate(tpl) {
@@ -96,6 +122,7 @@ function toggleTemplate(tpl) {
 }
 function isSelected(name) { return selectedTemplates.value.some(t => t.name === name); }
 function patternFor(tpl) {
+    if (tpl.pattern) return tpl.pattern;
     const n = (tpl.name || '').toLowerCase();
     return n.includes('contrarian') ? 'contrarian' : n.includes('data') ? 'data_drop' : n.includes('mistake') ? 'mistake_post'
         : n.includes('story') ? 'story' : n.includes('list') ? 'listicle' : n.includes('question') ? 'question'
