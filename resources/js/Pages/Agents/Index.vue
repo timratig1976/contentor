@@ -235,8 +235,14 @@ async function testAgent() {
 
 function openAgent(agent) { activeAgent.value = agent; testForm.agent = agent; detailTab.value = 'prompt'; }
 function closeAgent() { activeAgent.value = null; testResult.value = null; }
-function filteredLogs(agent) { return (props.agentLogs || []).filter(l => l.agent === agent).slice(0, 10); }
-function logCount(agent) { return (props.agentLogs || []).filter(l => l.agent === agent).length; }
+function filteredLogs(agent) {
+    const names = agent === 'review' ? ['review', 'quality_fix'] : [agent];
+    return (props.agentLogs || []).filter(l => names.includes(l.agent)).slice(0, 15);
+}
+function logCount(agent) {
+    const names = agent === 'review' ? ['review', 'quality_fix'] : [agent];
+    return (props.agentLogs || []).filter(l => names.includes(l.agent)).length;
+}
 
 // Aufgeklappte Log-Einträge (Details nur per Klick)
 const expandedLogs = ref(new Set());
