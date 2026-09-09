@@ -26,7 +26,6 @@ const rankings = ref({
     r_timing: props.angle.r_timing || 0,
 });
 const saving = ref(false);
-const showScoreDetail = ref(false);
 const criteriaLabels = { r_zielgruppe: 'Zielgruppe', r_viscale_fit: 'Fit', r_schaerfe: 'Schärfe', r_timing: 'Timing' };
 const criteriaHint = {
     r_zielgruppe: 'Wie präzise trifft der Angle den ICP? (1=generisch, 2=relevant, 3=punktgenau)',
@@ -34,6 +33,25 @@ const criteriaHint = {
     r_schaerfe: 'Wie provokativ/meinungsstark? (1=neutral, 2=pointiert, 3=scharf)',
     r_timing: 'Wie aktuell/relevant? (1=evergreen, 2=aktuell, 3=trend)',
 };
+
+// Score-Ring (SVG): Umfang = 2πr ≈ 97.4
+const CIRC = 2 * Math.PI * 15.5;
+const ringColor = computed(() => {
+    const s = props.angle.ranking_score ?? 0;
+    return s >= 10 ? '#10b981' : s >= 7 ? '#f59e0b' : '#ef4444';
+});
+const ringTextClass = computed(() => {
+    const s = props.angle.ranking_score ?? 0;
+    return s >= 10 ? 'text-green-600' : s >= 7 ? 'text-amber-600' : 'text-red-600';
+});
+const ringDash = computed(() => {
+    const frac = Math.min(Math.max((props.angle.ranking_score ?? 0) / 12, 0), 1);
+    return `${(frac * CIRC).toFixed(1)} ${CIRC.toFixed(1)}`;
+});
+function barColor(key) {
+    const v = rankings.value[key] || 0;
+    return v === 3 ? 'bg-indigo-500' : v === 2 ? 'bg-indigo-300' : 'bg-indigo-200';
+}
 function updateRanking() {
     saving.value = true;
     router.patch(`/api/angles/${props.angle.id}`, rankings.value, { preserveState: true, onFinish: () => saving.value = false });
@@ -188,6 +206,7 @@ onMounted(recommendStatement);
 
         <!-- ===================== TOP: Header + Score ===================== -->
         <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5 mb-5">
+            <!-- gleiche rechte Spaltenbreite wie unten (360px) -->
             <!-- Header -->
             <div class="neu-card p-5">
                 <div class="flex items-start justify-between gap-3">
@@ -210,32 +229,47 @@ onMounted(recommendStatement);
                 </div>
             </div>
 
-            <!-- Score (kompakt, hover für Details) -->
-            <div class="neu-card p-5 relative">
-                <div class="flex items-center gap-2 mb-3">
-                    <span class="text-3xl font-bold" :class="angle.ranking_score >= 10 ? 'text-green-600' : angle.ranking_score >= 7 ? 'text-yellow-600' : 'text-red-600'">{{ angle.ranking_score ?? '—' }}</span>
-                    <span class="text-xs text-gray-400">/12 · Rang {{ angle.ranking_rang ?? '—' }}</span>
-                </div>
-                <div @mouseenter="showScoreDetail = true" @mouseleave="showScoreDetail = false">
-                    <div v-for="(label, key) in criteriaLabels" :key="key" class="mb-1.5">
-                        <div class="flex justify-between mb-0.5"><span class="text-[10px] text-gray-400 uppercase">{{ label }}</span><span class="text-[10px] text-gray-600 font-medium">{{ rankings[key] }}/3</span></div>
-                        <div class="h-1 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-indigo-500 rounded-full" :style="{ width: ((rankings[key] || 0) / 3) * 100 + '%' }"></div></div>
-                    </div>
-                </div>
-                <div v-if="showScoreDetail" class="absolute top-full left-4 right-4 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-20">
-                    <div class="space-y-2">
-                        <div v-for="(label, key) in criteriaLabels" :key="key">
-                            <p class="text-xs font-medium text-gray-700">{{ label }} — {{ rankings[key] }}</p>
-                            <p class="text-[11px] text-gray-500">{{ criteriaHint[key] }}</p>
+            <!-- Score (Ring + klickbare Kriterien) -->
+            <div class="neu-card p-5">
+                <div class="flex items-center gap-4 mb-4">
+                    <div class="relative w-16 h-16 shrink-0">
+                        <svg viewBox="0 0 36 36" class="w-16 h-16 -rotate-90">
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e5e7eb" stroke-width="3.5"></circle>
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke-linecap="round" stroke-width="3.5"
+                                :stroke="ringColor" :stroke-dasharray="ringDash"></circle>
+                        </svg>
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <span class="text-xl font-bold tabular-nums" :class="ringTextClass">{{ angle.ranking_score ?? '—' }}</span>
                         </div>
                     </div>
-                    <p v-if="angle.score_reasoning" class="text-[11px] text-gray-600 mt-2 bg-blue-50 rounded p-2">{{ angle.score_reasoning }}</p>
+                    <div>
+                        <p class="text-sm font-semibold text-gray-800">Score</p>
+                        <p class="text-xs text-gray-400 mt-0.5">von 12 · Rang {{ angle.ranking_rang ?? '—' }}</p>
+                    </div>
                 </div>
+                <div class="space-y-2.5">
+                    <div v-for="(label, key) in criteriaLabels" :key="key">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] text-gray-400 uppercase tracking-wide" :title="criteriaHint[key]">{{ label }}</span>
+                            <div class="flex items-center gap-1">
+                                <button v-for="v in [1, 2, 3]" :key="v" @click="rankings[key] = v; updateRanking()"
+                                    class="w-5 h-5 rounded-md text-[10px] font-semibold transition-colors"
+                                    :class="rankings[key] === v ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'"
+                                    :title="criteriaHint[key]">{{ v }}</button>
+                            </div>
+                        </div>
+                        <div class="h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all" :class="barColor(key)" :style="{ width: ((rankings[key] || 0) / 3) * 100 + '%' }"></div>
+                        </div>
+                    </div>
+                </div>
+                <p v-if="saving" class="text-[10px] text-gray-400 mt-2">Speichere…</p>
+                <p v-if="angle.score_reasoning" class="text-[11px] text-gray-600 mt-3 bg-blue-50 border border-blue-100 rounded-lg p-2.5 leading-relaxed">{{ angle.score_reasoning }}</p>
             </div>
         </div>
 
         <!-- ===================== UNTEN: Editor (75%) + Produzieren (25%) ===================== -->
-        <div class="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-5">
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-5">
             <!-- Editor -->
             <div class="space-y-4">
                 <div v-if="!posts.length" class="neu-card p-10 text-center text-gray-400" style="min-height: 400px;">

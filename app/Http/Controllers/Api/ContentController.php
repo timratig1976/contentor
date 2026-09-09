@@ -139,7 +139,7 @@ class ContentController extends Controller
             // NEU: Varianten-Generierung (A/B-fähig)
             'variants_count' => 'sometimes|integer|min:1|max:5',
             'variant_patterns' => 'sometimes|array',
-            'variant_patterns.*' => 'string|in:story,listicle,contrarian,question,data_drop',
+            'variant_patterns.*' => 'string|in:story,listicle,contrarian,question,data_drop,mistake_post,framework',
         ]);
 
         $angle = Angle::with('strategy')->findOrFail($validated['angle_id']);
@@ -472,9 +472,33 @@ class ContentController extends Controller
             return $this->generateContent($angle, $params, $strategyCtx, $personaCtx);
         }
 
-        $channelRules = $strategyCtx['channel_rules'][$format] ?? [];
+        // Konfiguration des Production-Agents (Agents-Seite → Modell/Prompt)
+        $agentModels  = \App\Models\Setting::where('key', 'agent_models')->first()?->value ?? [];
+        $agentPrompts = \App\Models\Setting::where('key', 'agent_prompts')->first()?->value ?? [];
+        $prodCfg = $agentModels['production'] ?? [];
+
+        $provider = $prodCfg['provider'] ?? 'openai';
+        $rawModel = $prodCfg['model'] ?? 'gpt-4o';
+        $model = str_starts_with($rawModel, $provider . '/') ? $rawModel : $provider . '/' . $rawModel;
+
+        $temperature = (float) ($prodCfg['temperature'] ?? 0.7);
+        $maxTokens   = (int) ($prodCfg['max_tokens'] ?? 1200);
+
+        $systemPrompt = $agentPrompts['production']
+            ?? 'Du bist ein B2B-Content-Texter. Schreibe NUR den fertigen Content-Text, keine Erklärungen, keine Meta-Kommentare.';
+        // Strategie-Kontext-Platzhalter ersetzen (wie im Agent-Test-Pfad)
+        if (str_contains($systemPrompt, '{{strategy_context}}')) {
+            $contextBlock = app(\App\Services\AgentContextService::class)->build($strategy->key);
+            $systemPrompt = str_replace('{{strategy_context}}', $contextBlock, $systemPrompt);
+        }
+        // Der konfigurierbare Prompt richtet sich teils an Tool-Agenten — für den
+        // direkten Completion-Call explizit auf Textproduktion umschalten.
+        $systemPrompt .= "\n\n---\nAKTUELLER AUFTRAG: Du erhältst gleich einen konkreten Produktionsauftrag. "
+            . "Führe KEINE Tool-Aufrufe aus und beschreibe keine Vorgehensweise — schreibe direkt den fertigen Content-Text, sonst nichts.";
+
+        $channelRules = $strategyCtx['channel_rules'][$format] ?? $this->defaultChannelRules($format);
         $brandVoice = $strategyCtx['brand_voice'] ?? [];
-        $template = $pattern ? ($strategyCtx['post_templates'][$pattern] ?? null) : null;
+        $template = $pattern ? $this->findTemplate($strategyCtx['post_templates'] ?? [], $pattern) : null;
 
         $prompt = $this->buildContentPrompt($angle, $params, $format, $template, $channelRules, $brandVoice, $personaCtx, $strategy);
 
@@ -484,22 +508,28 @@ class ContentController extends Controller
                 'Authorization' => 'Bearer ' . $edenaiKey,
                 'Content-Type' => 'application/json',
             ])->timeout(90)->post('https://api.edenai.run/v3/chat/completions', [
-                'model' => 'openai/gpt-4o',
+                'model' => $model,
                 'messages' => [
-                    ['role' => 'system', 'content' => 'Du bist ein B2B-Content-Texter. Schreibe NUR den fertigen Content-Text, keine Erklärungen, keine Meta-Kommentare.'],
+                    ['role' => 'system', 'content' => $systemPrompt],
                     ['role' => 'user', 'content' => $prompt],
                 ],
-                'temperature' => 0.7,
-                'max_tokens' => 1200,
+                'temperature' => $temperature,
+                'max_tokens' => $maxTokens,
             ]);
 
             $text = $response->json('choices.0.message.content');
 
+            // HTTP-Fehler von EdenAI (400/401/404 …) explizit loggen statt stiller Fallback
+            if ($response->failed()) {
+                $err = $response->json('error.message') ?? $response->json('message') ?? $response->body();
+                throw new \RuntimeException('EdenAI HTTP ' . $response->status() . ': ' . (is_string($err) ? $err : json_encode($err)));
+            }
+
             // Kosten-Tracking: jeder LLM-Call wird geloggt (auch Fehlschläge)
             \App\Models\AgentLog::create([
                 'agent'       => 'production',
-                'provider'    => 'edenai/openai',
-                'model'       => 'openai/gpt-4o',
+                'provider'    => $provider,
+                'model'       => $model,
                 'input'       => substr($prompt, 0, 2000),
                 'output'      => substr($text ?? '', 0, 2000),
                 'status'      => $text ? 'success' : 'error',
@@ -513,8 +543,8 @@ class ContentController extends Controller
         } catch (\Throwable $e) {
             \App\Models\AgentLog::create([
                 'agent'       => 'production',
-                'provider'    => 'edenai/openai',
-                'model'       => 'openai/gpt-4o',
+                'provider'    => $provider,
+                'model'       => $model,
                 'input'       => substr($prompt, 0, 2000),
                 'output'      => substr('Exception: ' . $e->getMessage(), 0, 2000),
                 'status'      => 'error',
@@ -538,6 +568,86 @@ class ContentController extends Controller
             'question'   => 'Führe mit einer zentralen, spannungsreich gestellten Frage ein.',
             'data_drop'  => 'Beginne mit einer konkreten Zahl/Metrik als Hook und baue darauf auf.',
             default      => null,
+        };
+    }
+
+    /**
+     * Findet das passende Post-Template zum Varianten-Pattern.
+     * Unterstützt beide Formate:
+     * - neu: {templates: [{name, format, structure, example, description}, ...]}
+     * - alt: {data_drop: {label, beschreibung, struktur, beispiel_hook}}
+     */
+    private function findTemplate(array $postTemplates, string $pattern): ?array
+    {
+        $list = $postTemplates['templates'] ?? null;
+
+        if (is_array($list)) {
+            // Pattern → Namensbestandteile, nach denen im Template-Namen gesucht wird
+            $needles = match ($pattern) {
+                'contrarian'  => ['contrarian'],
+                'data_drop'   => ['data'],
+                'mistake_post' => ['mistake', 'fehler'],
+                'framework'   => ['framework', 'modell'],
+                'story'       => ['story', 'storytelling'],
+                'listicle'    => ['listicle', 'list'],
+                'question'    => ['question', 'frage'],
+                default       => [$pattern],
+            };
+
+            foreach ($list as $tpl) {
+                $name = strtolower((string) ($tpl['name'] ?? ''));
+                foreach ($needles as $needle) {
+                    if (str_contains($name, $needle)) {
+                        return $tpl;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        // Legacy-Format: direkter Key-Zugriff
+        return $postTemplates[$pattern] ?? null;
+    }
+
+    /**
+     * Sinnvolle Kanal-Standardregeln, falls keine channel_rules konfiguriert sind.
+     */
+    private function defaultChannelRules(string $format): array
+    {
+        return match ($format) {
+            'linkedin_post' => [
+                'word_count' => ['min' => 120, 'max' => 220],
+                'hook_max_words' => 12,
+                'structure' => ['Hook (Zeile 1, max 12 Wörter, provokante These)', 'Kontext/Problem (2-3 Sätze)', 'Mechanismus/Beleg (3-5 Sätze, konkreter Nutzen)', 'Konsequenz für den Leser (1-2 Sätze)', 'Soft CTA (1 Satz)'],
+                'cta_style' => 'Soft CTA — Frage oder Einladung zum Austausch, kein harter Verkauf',
+            ],
+            'ad_copy' => [
+                'primary_text_max_chars' => 125,
+                'headline_max_chars' => 40,
+                'structure' => ['Primary Text (max 125 Zeichen)', 'Headline (max 40 Zeichen)', 'Description', 'CTA'],
+                'cta_style' => 'Klarer Handlungs-CTA',
+            ],
+            'newsletter_acquisition' => [
+                'word_count' => ['min' => 200, 'max' => 400],
+                'structure' => ['Betreff (max 50 Zeichen)', 'Preview-Text', 'Body (Problem → Lösung → Beweis)', 'CTA'],
+                'cta_style' => 'Ein klarer CTA-Link',
+            ],
+            'newsletter_bk' => [
+                'word_count' => ['min' => 150, 'max' => 350],
+                'structure' => ['Betreff', 'Persönliche Einleitung', 'Hauptteil (1-2 konkrete Punkte)', 'Next Step', 'Sign-off'],
+                'cta_style' => 'Konkreter nächster Schritt',
+            ],
+            'landing_page_headlines' => [
+                'structure' => ['Hero Headline (max 20 Wörter)', 'Sub-Headline (max 30 Wörter)', '3 Bullet Points', 'CTA-Button-Text'],
+                'cta_style' => 'Kurzer Button-Text (2-4 Wörter)',
+            ],
+            'blog_post' => [
+                'word_count' => ['min' => 400, 'max' => 800],
+                'structure' => ['Einleitung (Hook + These)', '2-4 Absätze mit je einem Punkt', 'Fazit + CTA'],
+                'cta_style' => 'CTA am Ende',
+            ],
+            default => [],
         };
     }
 
@@ -568,9 +678,20 @@ class ContentController extends Controller
             $lines[] = "STATEMENT-TYP ({$params['statement_type']}): {$params['statement_type_hint']}";
         }
         if ($template) {
-            $lines[] = "PATTERN: {$template['label']} — {$template['beschreibung']}";
-            $lines[] = "Struktur: " . implode(' → ', $template['struktur']);
-            $lines[] = "Beispiel-Hook: \"{$template['beispiel_hook']}\"";
+            // Neues Format: name/description/structure/example — Legacy: label/beschreibung/struktur/beispiel_hook
+            $tplName = $template['name'] ?? $template['label'] ?? $pattern;
+            $tplDesc = $template['description'] ?? $template['beschreibung'] ?? '';
+            $tplStructure = $template['structure'] ?? $template['struktur'] ?? null;
+            $tplExample = $template['example'] ?? $template['beispiel_hook'] ?? null;
+
+            $lines[] = "PATTERN: {$tplName}" . ($tplDesc ? " — {$tplDesc}" : '');
+            if ($tplStructure) {
+                $structure = is_array($tplStructure) ? implode(' → ', $tplStructure) : str_replace("\n", ' → ', $tplStructure);
+                $lines[] = "Struktur (zwingend einhalten, jeder Punkt = eigener Absatz): " . $structure;
+            }
+            if ($tplExample) {
+                $lines[] = "Beispiel (nur als Stil-Referenz, NICHT kopieren): \"{$tplExample}\"";
+            }
         } elseif (!empty($params['variant_pattern'])) {
             // A/B-Variante: Stil-Hinweis, damit jede Variante anders ansetzt
             $hint = $this->variantPatternHint($params['variant_pattern']);

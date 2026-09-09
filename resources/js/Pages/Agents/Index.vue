@@ -34,11 +34,11 @@ const prompts = reactive({
     coordinator: props.agentPrompts?.coordinator || '',
 });
 const models = reactive({
-    research: { provider: props.agentModels?.research?.provider || 'openai', model: props.agentModels?.research?.model || 'gpt-4o' },
-    angle: { provider: props.agentModels?.angle?.provider || 'openai', model: props.agentModels?.angle?.model || 'gpt-4o' },
-    production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-3-5-sonnet-20240620' },
-    review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o' },
-    coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o' },
+    research: { provider: props.agentModels?.research?.provider || 'openai', model: props.agentModels?.research?.model || 'gpt-4o', temperature: props.agentModels?.research?.temperature ?? 0.7, max_tokens: props.agentModels?.research?.max_tokens || 2000 },
+    angle: { provider: props.agentModels?.angle?.provider || 'openai', model: props.agentModels?.angle?.model || 'gpt-4o', temperature: props.agentModels?.angle?.temperature ?? 0.7, max_tokens: props.agentModels?.angle?.max_tokens || 2000 },
+    production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-3-5-sonnet-20240620', temperature: props.agentModels?.production?.temperature ?? 0.7, max_tokens: props.agentModels?.production?.max_tokens || 1200 },
+    review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o', temperature: props.agentModels?.review?.temperature ?? 0.3, max_tokens: props.agentModels?.review?.max_tokens || 2000 },
+    coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o', temperature: props.agentModels?.coordinator?.temperature ?? 0.7, max_tokens: props.agentModels?.coordinator?.max_tokens || 2000 },
 });
 
 // ─── Workflow & Loops ───────────────────────────────────────────────────
@@ -537,6 +537,18 @@ onMounted(() => { loadWorkflowRuns(); });
                             <select v-model="models[activeAgent].model" class="w-full bg-neu  rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400">
                                 <option v-for="m in (modelOptions[models[activeAgent].provider] || modelOptions.value?.[models[activeAgent].provider] || [])" :key="m" :value="m">{{ m }}</option>
                             </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Temperature (0–2)</label>
+                            <input type="number" step="0.1" min="0" max="2" v-model.number="models[activeAgent].temperature"
+                                class="w-full bg-neu rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400" placeholder="0.7">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Max Tokens</label>
+                            <input type="number" step="100" min="100" max="8000" v-model.number="models[activeAgent].max_tokens"
+                                class="w-full bg-neu rounded-lg p-2 text-sm text-gray-800 focus:outline-none focus:border-gray-400" placeholder="1200">
                         </div>
                     </div>
                     <div class="mt-4 p-3 neu-card-sm">
