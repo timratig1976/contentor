@@ -252,6 +252,9 @@ let editTimer = null;
 // Vergleichs-Modal: alter Text vs. KI-Vorschlag
 const editProposal = ref(null); // { before, after }
 
+// Quality-Gate-Protokoll auf-/zuklappen
+const showGateReport = ref(false);
+
 const proposalDelta = computed(() => {
     if (!editProposal.value) return '';
     const d = editProposal.value.after.length - editProposal.value.before.length;
@@ -468,6 +471,36 @@ onMounted(recommendStatement);
                         </div>
                         <div v-if="activePost.quality_comment" class="mb-3 text-xs bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3 py-2 leading-relaxed">
                             <span class="font-semibold">🔍 KI-Review:</span> {{ activePost.quality_comment }}
+                        </div>
+
+                        <!-- Quality-Gate-Protokoll (aufklappbar) -->
+                        <div v-if="(activePost.quality_flags?.steps || []).length" class="mb-3 border border-gray-200 rounded-lg overflow-hidden">
+                            <button @click="showGateReport = !showGateReport"
+                                class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-xs text-gray-600">
+                                <span>🚦 Quality-Gate-Protokoll ({{ activePost.quality_flags.steps.length }} Schritte)</span>
+                                <span class="text-gray-400 transition-transform" :class="showGateReport ? 'rotate-90' : ''">▸</span>
+                            </button>
+                            <div v-if="showGateReport" class="px-3 py-2 space-y-2 bg-white">
+                                <div v-for="(step, i) in activePost.quality_flags.steps" :key="i" class="text-xs border-l-2 pl-3 py-1"
+                                    :class="step.stage === 'rules' ? 'border-amber-300' : step.stage === 'fix' ? 'border-blue-300' : 'border-green-300'">
+                                    <template v-if="step.stage === 'rules'">
+                                        <span class="font-semibold text-amber-700">Regel-Check (Runde {{ step.round }}):</span>
+                                        <span v-if="!step.findings.length" class="text-green-700"> ✓ keine Befunde</span>
+                                        <span v-else class="text-gray-700"> {{ step.findings.join(' · ') }}</span>
+                                    </template>
+                                    <template v-else-if="step.stage === 'fix'">
+                                        <span class="font-semibold text-blue-700">Auto-Korrektur (Runde {{ step.round }}):</span>
+                                        <span v-if="step.result === 'llm_error'" class="text-red-600"> LLM-Fehler — Text blieb unverändert</span>
+                                        <span v-else class="text-gray-700"> {{ step.chars_before }} → {{ step.chars_after }} Zeichen</span>
+                                        <p v-if="step.instruction" class="text-gray-500 mt-0.5 italic">Anweisung: {{ step.instruction }}</p>
+                                    </template>
+                                    <template v-else>
+                                        <span class="font-semibold text-green-700">KI-Review:</span>
+                                        <span class="text-gray-700"> Score {{ step.score ?? '—' }}/10</span>
+                                    </template>
+                                    <span class="text-gray-300 ml-2">{{ (step.at || '').slice(11, 19) }}</span>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Editor-ähnliche Textarea (automatisch hohe Fläche) -->

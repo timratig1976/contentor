@@ -204,6 +204,7 @@ class ContentQualityService
             'too_long' => false,
             'fix_rounds' => 0,
             'fixed_findings' => [],
+            'steps' => [], // chronologischer Gate-Report für die UI
         ];
 
         // ── Regel-Check + Auto-Fix-Loop ─────────────────────────────
@@ -214,22 +215,36 @@ class ContentQualityService
             $flags['too_short'] = $check['too_short'];
             $flags['too_long'] = $check['too_long'];
 
-            if (! $this->hasBlockingFindings($check)) {
+            $findings = $this->findingsList($check);
+            $flags['steps'][] = [
+                'stage' => 'rules',
+                'round' => $round,
+                'findings' => $findings,
+                'at' => now()->toIso8601String(),
+            ];
+
+            if ($findings === []) {
                 break;
             }
 
             if ($round === 1) {
-                $flags['fixed_findings'] = array_merge(
-                    $check['violations'],
-                    array_filter([
-                        $check['missing_cta'] ? 'Pflicht-CTA fehlte' : null,
-                        $check['too_short'] ? 'Text zu kurz' : null,
-                        $check['too_long'] ? 'Text zu lang' : null,
-                    ])
-                );
+                $flags['fixed_findings'] = $findings;
             }
 
-            $fixed = $this->applyFix($content, $this->fixInstruction($check, $strategy), $item->format);
+            $instruction = $this->fixInstruction($check, $strategy);
+            $beforeLen = mb_strlen($content);
+            $fixed = $this->applyFix($content, $instruction, $item->format);
+
+            $flags['steps'][] = [
+                'stage' => 'fix',
+                'round' => $round,
+                'instruction' => $instruction,
+                'result' => $fixed === null ? 'llm_error' : 'ok',
+                'chars_before' => $beforeLen,
+                'chars_after' => $fixed === null ? $beforeLen : mb_strlen($fixed),
+                'at' => now()->toIso8601String(),
+            ];
+
             if ($fixed === null) {
                 // LLM-Fehler: Fix-Runden abbrechen, Befund als Flag stehen lassen
                 break;
@@ -243,6 +258,13 @@ class ContentQualityService
         // ── LLM-Score (auf finalen Text) ────────────────────────────
         $review = $this->score($content, $item->format, $strategy, $strategyCtx, $item->icp);
 
+        $flags['steps'][] = [
+            'stage' => 'score',
+            'score' => $review['score'],
+            'comment' => $review['comment'],
+            'at' => now()->toIso8601String(),
+        ];
+
         $item->content = $content;
         $item->quality_score = $review['score'];
         $item->quality_comment = $review['comment'];
@@ -250,6 +272,24 @@ class ContentQualityService
         $item->save();
 
         return $item;
+    }
+
+    /**
+     * Befunde als lesbare Liste (leer = alles in Ordnung).
+     *
+     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool} $check
+     * @return array<int,string>
+     */
+    private function findingsList(array $check): array
+    {
+        return array_values(array_merge(
+            $check['violations'],
+            array_filter([
+                $check['missing_cta'] ? 'Pflicht-CTA fehlt' : null,
+                $check['too_short'] ? 'Text zu kurz fürs Format' : null,
+                $check['too_long'] ? 'Text zu lang fürs Format' : null,
+            ])
+        ));
     }
 
     /**
