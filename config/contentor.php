@@ -19,7 +19,6 @@ return [
         'B2B-3' => 'CRM- & Prozessverantwortliche',
         'B2C'   => 'Endkunden (B2C)',
         'UNI'   => 'Hochschulen & Forschung',
-        'BK'    => 'Bestandskunden',
     ],
 
 ];

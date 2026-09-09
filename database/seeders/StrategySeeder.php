@@ -14,7 +14,7 @@ class StrategySeeder extends Seeder
             'name' => 'viscale',
             'config' => [
                 'rules' => [
-                    'icpKeys' => ['B2B-1', 'B2B-2', 'B2B-3', 'B2C', 'UNI', 'BK'],
+                    'icpKeys' => ['B2B-1', 'B2B-2', 'B2B-3', 'B2C', 'UNI'],
                     'hashtags' => ['#viscale', '#Vertriebssystem', '#HubSpot', '#Mittelstand'],
                     'signoff' => 'das viscale-Team',
                     'editorialPlanTitle' => 'Redaktionsplan · viscale',
@@ -29,7 +29,6 @@ class StrategySeeder extends Seeder
                     ],
                     'defaultClusterKey' => 'cluster_2',
                     'icpGuesser' => [
-                        ['icp' => 'BK', 'match' => 'bestand|renewal|adoption|retainer'],
                         ['icp' => 'UNI', 'match' => 'uni|hochschule|forschung'],
                         ['icp' => 'B2C', 'match' => 'b2c|consumer|ecommerce'],
                         ['icp' => 'B2B-2', 'match' => 'forecast|pipeline|head of sales|sales'],
@@ -75,7 +74,7 @@ class StrategySeeder extends Seeder
             'name' => 'vitalents',
             'config' => [
                 'rules' => [
-                    'icpKeys' => ['B2B-1', 'B2B-2', 'B2B-3', 'B2C', 'UNI', 'BK'],
+                    'icpKeys' => ['B2B-1', 'B2B-2', 'B2B-3', 'B2C', 'UNI'],
                     'hashtags' => ['#vitalents', '#Recruiting', '#Klinik', '#Pflege'],
                     'signoff' => 'das vitalents-Team',
                     'editorialPlanTitle' => 'Redaktionsplan · vitalents',
@@ -89,7 +88,6 @@ class StrategySeeder extends Seeder
                     ],
                     'defaultClusterKey' => 'cluster_1',
                     'icpGuesser' => [
-                        ['icp' => 'BK', 'match' => 'bestand|renewal|adoption|retainer'],
                         ['icp' => 'B2B-2', 'match' => 'klinik|pflege|recruiting|personal'],
                     ],
                     'defaultIcp' => 'B2B-1',

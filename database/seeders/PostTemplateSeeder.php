@@ -32,7 +32,7 @@ class PostTemplateSeeder extends Seeder
                 'format' => 'linkedin_post',
                 'structure' => "Fehler 1 + Folge\nFehler 2 + Folge\nFehler 3 + Folge\nWie man es richtig macht\nSoft CTA",
                 'example' => '3 Fehler bei der HubSpot-Property-Hygiene: 1. Pflichtfelder nicht gesetzt. 2. Keine Pipeline-Stages definiert. 3. Datenqualität nie geprüft. Die Lösung: Einmal Setup, wöchentliches Review.',
-                'best_for' => ['B2B-3', 'BK'],
+                'best_for' => ['B2B-3', 'B2B-1'],
                 'description' => 'Die N häufigsten Fehler bei X',
             ],
             [
@@ -64,7 +64,7 @@ class PostTemplateSeeder extends Seeder
                 'format' => 'linkedin_post',
                 'structure' => "Frage (provokant / neugierig)\nKontext (warum die Frage)\nEigene Einschätzung\nDiskussionsaufforderung",
                 'example' => 'Warum haben die meisten Unternehmen kein Pipeline-Review? Weil es weh tut, die Wahrheit zu sehen. Aber genau das ist der erste Schritt zur Besserung. Wie haltet ihr es?',
-                'best_for' => ['B2B-1', 'B2B-2', 'BK'],
+                'best_for' => ['B2B-1', 'B2B-2', 'B2B-3'],
                 'description' => 'Frage ans Netzwerk, hohe Engagement-Rate',
             ],
             [
@@ -88,8 +88,8 @@ class PostTemplateSeeder extends Seeder
                 'format' => 'newsletter_bk',
                 'structure' => "Betreff (max 50 Zeichen)\nPreview-Text\nEinleitung (persönlich)\nHauptteil (1-2 konkrete Punkte)\nNext Step (Handlungsaufforderung)\nSign-off",
                 'example' => 'Betreff: Datenhygiene in 15 Minuten',
-                'best_for' => ['BK', 'UNI'],
-                'description' => 'Bestandskunden-Newsletter mit konkreten Handlungsschritten',
+                'best_for' => ['B2B-1', 'B2B-2', 'B2B-3'],
+                'description' => 'Bestandskunden-Newsletter mit konkreten Handlungsschritten (BK = Lifecycle-Phase, Zielgruppe = jeweiliges B2B-Segment)',
             ],
             [
                 'name' => 'Landing Page Headline',

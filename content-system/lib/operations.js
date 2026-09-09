@@ -569,14 +569,14 @@ async function summarizeIdea(args, config) {
     // Ohne ICP: Versuche aus Foundation zu erraten, sonst frage
     if (foundation.available && foundation.index?.mappings?.icp_docs?.length) {
       // ICP aus Foundation ableiten (erster Treffer)
-      const firstIcp = foundation.index.mappings.icp_docs[0]?.label?.match(/(B2B-[123]|B2C|UNI|BK)/i)?.[1];
+      const firstIcp = foundation.index.mappings.icp_docs[0]?.label?.match(/(B2B-[123]|B2C|UNI)/i)?.[1];
       if (firstIcp) {
         args.icp = firstIcp.toUpperCase();
         progress(config.__runtime, `🎯 ICP automatisch aus Foundation abgeleitet: ${args.icp}`);
       }
     }
     if (!args.icp) {
-      throw new SkillError(ERROR_CODES.VALIDATION_ERROR, "ICP unklar und keine Foundation-Unterlagen verfügbar. Bitte ICP explizit angeben (B2B-1, B2B-2, B2B-3, B2C, UNI, BK).", {
+      throw new SkillError(ERROR_CODES.VALIDATION_ERROR, "ICP unklar und keine Foundation-Unterlagen verfügbar. Bitte ICP explizit angeben (B2B-1, B2B-2, B2B-3, B2C, UNI).", {
         question: "Welcher ICP passt?",
         foundation_available: foundation.available,
         foundation_warning: foundationWarning,
@@ -1598,7 +1598,7 @@ async function ensureBkAssets(config, unit) {
           "💡",
           "",
           "",
-          "BK",
+          rules.defaultIcp || "B2B-1",
           "",
           "",
           "newsletter_bk",
@@ -1620,6 +1620,8 @@ async function ensureBkAssets(config, unit) {
 async function showBkBacklog(config, unit) {
   const resolved = resolveUnitFrom(config, unit);
   const suggestions = suggestBkTopicsFromSpec(resolved);
+  // BK ist eine Lifecycle-Phase, kein ICP — Zielgruppe bleibt das Segment-Default der Unit
+  const bkIcp = getUnitRules(resolved).defaultIcp || "B2B-1";
 
   // DB-First
   if (isDbConfigured(config)) {
@@ -1630,7 +1632,7 @@ async function showBkBacklog(config, unit) {
       progress(config.__runtime, "🌱 Lege initiale BK-Backlog-Einträge in DB an ...");
       for (const topic of suggestions.slice(0, 3)) {
         await dbCreateContentItem(config, {
-          unit_id: resolved, typ: "bk_backlog", icp: "BK", format: "newsletter_bk",
+          unit_id: resolved, typ: "bk_backlog", icp: bkIcp, format: "newsletter_bk",
           title: topic, source: "Support-Fragen, Delivery-Best-Practice",
           notes: "Initialer BK-Backlog-Eintrag",
         });
@@ -1646,7 +1648,7 @@ async function showBkBacklog(config, unit) {
       data: { operation: "bk_backlog", unit: resolved, bk_entries: bkEntries, total_entries: bkEntries.length, topic_suggestions: suggestions, db: true },
       message: "✅ BK-Backlog aus DB geladen.",
       html: `<div><h3>BK-Backlog (DB)</h3><p>${bkEntries.length} Einträge</p>${toBulletHtml(bkEntries.map((e) => `${e.status} ${e.topic}`))}</div>`,
-      context: buildHandoffContext({ workflow: "bk_newsletter", icp: "BK", unit: resolved, nextSuggestedActions: ["newsletter_bk"] }),
+      context: buildHandoffContext({ workflow: "bk_newsletter", icp: bkIcp, unit: resolved, nextSuggestedActions: ["newsletter_bk"] }),
     });
   }
 
@@ -1687,13 +1689,17 @@ async function showBkBacklog(config, unit) {
     },
     message: "✅ BK-Backlog geladen (Drive-Fallback).",
     html: `<div><h3>BK-Backlog</h3><p>${bkEntries.length} Einträge</p>${toBulletHtml(bkEntries.map((e) => `${e.status} ${e.topic}`))}</div>`,
-    context: buildHandoffContext({ workflow: "bk_newsletter", icp: "BK", unit: resolved, nextSuggestedActions: ["newsletter_bk"] }),
+    context: buildHandoffContext({ workflow: "bk_newsletter", icp: bkIcp, unit: resolved, nextSuggestedActions: ["newsletter_bk"] }),
   });
 }
 
 async function draftBkNewsletter(config, args) {
   const unit = args.unit || config.unit || DEFAULT_UNIT;
   progress(config.__runtime, "📰 Erstelle BK-Newsletter-Draft ...");
+
+  const rules = getUnitRules(unit);
+  // BK ist eine Lifecycle-Phase, kein ICP — Zielgruppe bleibt das Segment-Default der Unit
+  const bkIcp = rules.defaultIcp || "B2B-1";
 
   const strategyCtx = await strategy.getStrategyContext(config, unit);
 
@@ -1706,11 +1712,10 @@ async function draftBkNewsletter(config, args) {
       },
       message: "✅ Kein Thema gesetzt. Hier sind BK-Themenvorschläge.",
       html: `<div><h3>BK-Themenvorschläge</h3>${toBulletHtml(suggestBkTopicsFromSpec(unit))}</div>`,
-      context: buildHandoffContext({ workflow: "newsletter_bk", icp: "BK", unit, nextSuggestedActions: ["newsletter_bk"] }),
+      context: buildHandoffContext({ workflow: "newsletter_bk", icp: bkIcp, unit, nextSuggestedActions: ["newsletter_bk"] }),
     });
   }
 
-  const rules = getUnitRules(unit);
   const newsletter = buildBkNewsletter(args, strategyCtx);
   const sendDate = new Date().toISOString().slice(0, 10);
   const fullContent = [
@@ -1729,7 +1734,7 @@ async function draftBkNewsletter(config, args) {
     const dbItem = await dbCreateContentItem(config, {
       unit_id: unit,
       typ: "newsletter_bk",
-      icp: "BK",
+      icp: bkIcp,
       format: "newsletter_bk",
       title: newsletter.topic,
       owner: rules.defaultOwner,
@@ -1743,7 +1748,7 @@ async function draftBkNewsletter(config, args) {
       progress(config.__runtime, `💾 Newsletter-Draft in DB: ${dbItem.item_id}`);
 
       // Medien-Briefing für Header-Bild
-      const mediaBriefings = media.buildMediaBriefing({ angle: newsletter.topic, icp: "BK" }, "newsletter_bk", strategyCtx);
+      const mediaBriefings = media.buildMediaBriefing({ angle: newsletter.topic, icp: bkIcp }, "newsletter_bk", strategyCtx);
 
       return successResponse({
         data: {
@@ -1763,7 +1768,7 @@ async function draftBkNewsletter(config, args) {
         html: `<div><h3>${escapeHtml(newsletter.topic)}</h3><p><b>Betreff:</b> ${escapeHtml(newsletter.subject)}</p><p><b>DB-ID:</b> ${escapeHtml(dbItem.item_id)}</p><p style="color:#888;font-size:0.85em;">Zum Drive-Export: action=export_to_drive, item_id=${escapeHtml(dbItem.item_id)}</p>${mediaBriefings.length ? `<p style="color:#888;">📸 ${mediaBriefings.length} Medien-Briefing(s) → <code>media_briefing</code> → <code>media_generieren</code></p>` : ""}</div>`,
         context: buildHandoffContext({
           workflow: "newsletter_bk",
-          icp: "BK",
+          icp: bkIcp,
           unit,
           nextSuggestedActions: mediaBriefings.length
             ? ["media_briefing", "export_to_drive", "bk_newsletter", "redaktionsplan"]
@@ -1786,7 +1791,7 @@ async function draftBkNewsletter(config, args) {
   await driveData(config, "writeDoc", { docId, content: fullContent });
   await driveData(config, "appendRow", {
     sheetId: roots.contentPlanSheetId,
-    values: [`CONT-${sendDate.replace(/-/g, "")}-${String(Date.now()).slice(-4)}`, sendDate, "newsletter_bk", "✅", "", "", "BK", "", "", "newsletter_bk", newsletter.topic, rules.defaultOwner, sendDate, docId, created.url || "", (args.sources || []).join(", ") || "Quelle offen", "BK-Newsletter produziert"],
+    values: [`CONT-${sendDate.replace(/-/g, "")}-${String(Date.now()).slice(-4)}`, sendDate, "newsletter_bk", "✅", "", "", bkIcp, "", "", "newsletter_bk", newsletter.topic, rules.defaultOwner, sendDate, docId, created.url || "", (args.sources || []).join(", ") || "Quelle offen", "BK-Newsletter produziert"],
   });
 
   return successResponse({
@@ -1805,7 +1810,7 @@ async function draftBkNewsletter(config, args) {
     html: `<div><h3>${escapeHtml(newsletter.topic)}</h3><p><b>Betreff:</b> ${escapeHtml(newsletter.subject)}</p></div>`,
     context: buildHandoffContext({
       workflow: "newsletter_bk",
-      icp: "BK",
+      icp: bkIcp,
       unit,
       nextSuggestedActions: ["bk_newsletter", "redaktionsplan"],
       resources: { newsletter_doc_id: docId, newsletter_doc_url: created.url || null },

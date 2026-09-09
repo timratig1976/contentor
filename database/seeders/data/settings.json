@@ -9,7 +9,7 @@
     {
         "id": 2,
         "key": "llm_keys",
-        "value": "{\"edenai_key\":\"sk-eden-live-N6CQubol_JLXn6b7AAXWmKXnnTIUM0grwdFBJv_j4Jcf3d81f43\",\"serperdev_key\":null,\"content_api_url\":\"http:\\/\\/localhost:8000\\/api\"}",
+        "value": "{\"edenai_key\":\"sk-eden-live-N6CQubol_JLXn6b7AAXWmKXnnTIUM0grwdFBJv_j4Jcf3d81f43\",\"content_api_url\":\"http:\\/\\/localhost:8000\\/api\"}",
         "created_at": "2026-09-01 12:57:43",
         "updated_at": "2026-09-01 12:57:43"
     },

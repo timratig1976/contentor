@@ -48,7 +48,7 @@ const UNITS = Object.freeze({
     legacyIdeasInboxDocId: "1xgThGkr4qlWYbC7rC5cEBDgC5aRUW2wiRTRqzpUkvuU",
     legacyEditorialPlanDocId: "1hnxegldcEpH5gfw_sK8_YJbGhD-FPjTYRvkP0fcv9dk",
     rules: {
-      icpKeys: ["B2B-1", "B2B-2", "B2B-3", "B2C", "UNI", "BK"],
+      icpKeys: ["B2B-1", "B2B-2", "B2B-3", "B2C", "UNI"],
       hashtags: ["#viscale", "#Vertriebssystem", "#HubSpot", "#Mittelstand"],
       signoff: "das viscale-Team",
       editorialPlanTitle: "Redaktionsplan · viscale",
@@ -63,7 +63,6 @@ const UNITS = Object.freeze({
       ],
       defaultClusterKey: "cluster_2",
       icpGuesser: [
-        { icp: "BK", match: /bestand|renewal|adoption|retainer/ },
         { icp: "UNI", match: /uni|hochschule|forschung/ },
         { icp: "B2C", match: /b2c|consumer|ecommerce/ },
         { icp: "B2B-2", match: /forecast|pipeline|head of sales|sales/ },
@@ -124,7 +123,7 @@ const UNITS = Object.freeze({
     bkBacklogName: "Newsletter-BK-Backlog",
     bkFolderName: "Newsletter-BK",
     rules: {
-      icpKeys: ["B2B-1", "B2B-2", "B2B-3", "B2C", "UNI", "BK"],
+      icpKeys: ["B2B-1", "B2B-2", "B2B-3", "B2C", "UNI"],
       hashtags: ["#vitalents", "#Recruiting", "#Klinik", "#Pflege"],
       signoff: "das vitalents-Team",
       editorialPlanTitle: "Redaktionsplan · vitalents",
@@ -138,7 +137,6 @@ const UNITS = Object.freeze({
       ],
       defaultClusterKey: "cluster_1",
       icpGuesser: [
-        { icp: "BK", match: /bestand|renewal|adoption|retainer/ },
         { icp: "B2B-2", match: /klinik|pflege|recruiting|personal/ },
       ],
       defaultIcp: "B2B-1",

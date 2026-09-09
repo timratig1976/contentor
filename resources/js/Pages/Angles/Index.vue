@@ -86,7 +86,6 @@ async function setStatus(angle, status) {
                 <option value="B2B-3">B2B-3</option>
                 <option value="B2C">B2C</option>
                 <option value="UNI">UNI</option>
-                <option value="BK">BK</option>
             </select>
             <select v-model="filterStatus" @change="applyFilters" class="bg-neu  rounded-lg px-3 py-2 text-sm text-gray-800">
                 <option value="">Alle Status</option>
