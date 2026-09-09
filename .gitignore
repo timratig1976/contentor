@@ -4,7 +4,8 @@
 .env.backup
 .env.production
 /content-agent/trace_output.json
-/content-agent/__pycache__/
+__pycache__/
+*.pyc
 .phpactor.json
 .phpunit.result.cache
 /.codex
