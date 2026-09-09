@@ -3,14 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\ContentItem;
+use App\Models\ContentKpi;
 use App\Models\Strategy;
+use App\Services\KpiLearningService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class OutputPageController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, KpiLearningService $kpiLearning): Response
     {
         $strategyKey = $request->input('strategy', 'viscale');
         $strategy = Strategy::where('key', $strategyKey)->firstOrFail();
@@ -26,10 +28,21 @@ class OutputPageController extends Controller
                 return $item;
             });
 
+        // Neueste KPI-Messung pro Content-Item (für Badges in der Liste)
+        $kpis = ContentKpi::where('strategy_id', $strategy->id)
+            ->orderBy('measured_at')
+            ->get()
+            ->groupBy('content_item_id')
+            ->map(fn ($group) => $group->last())
+            ->values()
+            ->keyBy('content_item_id');
+
         return Inertia::render('Output/Index', [
             'strategies' => $strategies,
             'currentStrategy' => $strategy,
             'items' => $items,
+            'kpis' => $kpis,
+            'learningReport' => $kpiLearning->report($strategy),
         ]);
     }
 

@@ -19,6 +19,7 @@ class ContentController extends Controller
         private ContentRulesService $rulesService,
         private MediaBriefingService $mediaService,
         private \App\Services\LlmService $llm,
+        private \App\Services\KpiLearningService $kpiLearning,
     ) {}
 
     /**
@@ -77,7 +78,7 @@ class ContentController extends Controller
             'strategy' => 'required|string|exists:strategies,key',
             'icp' => 'nullable|string',
             'source_type' => 'nullable|string',
-            'persona_id' => 'nullable|string|exists:personas,id',
+            'persona_id' => 'nullable|integer|exists:personas,id',
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
@@ -129,7 +130,7 @@ class ContentController extends Controller
             'angle_id' => 'required|string|exists:angles,id',
             'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk,blog_post',
             'pattern' => 'nullable|string|in:contrarian_take,data_drop,mistake_post,framework',
-            'persona_id' => 'nullable|string|exists:personas,id',
+            'persona_id' => 'nullable|integer|exists:personas,id',
             'metric' => 'nullable|string',
             'mechanism' => 'nullable|string',
             'proofs' => 'nullable|string',
@@ -446,6 +447,12 @@ class ContentController extends Controller
         $systemPrompt = str_contains($systemPrompt, '{{strategy_context}}')
             ? str_replace('{{strategy_context}}', $contextBlock, $systemPrompt)
             : $systemPrompt . "\n\n" . $contextBlock;
+
+        // KPI-Lernschleife: Erkenntnisse aus echten Performance-Daten injizieren
+        $learnings = $this->kpiLearning->promptBlock($strategy);
+        if ($learnings !== '') {
+            $systemPrompt .= "\n\n" . $learnings;
+        }
         // Der konfigurierbare Prompt richtet sich teils an Tool-Agenten — für den
         // direkten Completion-Call explizit auf Textproduktion umschalten.
         $systemPrompt .= "\n\n---\nAKTUELLER AUFTRAG: Du erhältst gleich einen konkreten Produktionsauftrag. "

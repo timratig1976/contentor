@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AgentConfigController;
 use App\Http\Controllers\Api\EdenAIModelsController;
 use App\Http\Controllers\Api\AngleController;
 use App\Http\Controllers\Api\ContentController;
+use App\Http\Controllers\Api\KpiController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\MonitoringController;
 use App\Http\Controllers\Api\NewsletterController;
@@ -45,6 +46,11 @@ Route::post('/content/{contentItem}/select-variant', [ContentController::class, 
 Route::post('/content/{contentItem}/assistant-edit', [ContentController::class, 'assistantEdit']);
 Route::get('/content/overview', [ContentController::class, 'overview']);
 Route::get('/content/{contentItem}/preview', [ContentController::class, 'preview']);
+
+// KPIs + Lernschleife (Performance-Daten nach dem Publishing)
+Route::post('/content-kpis', [KpiController::class, 'store']);
+Route::get('/content-kpis', [KpiController::class, 'index']);
+Route::get('/content-kpis/learnings', [KpiController::class, 'learnings']);
 
 // Redaktionsplan
 Route::get('/redaktionsplan', [RedaktionsplanController::class, 'index']);

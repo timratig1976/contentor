@@ -1,13 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, reactive } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-const props = defineProps({ strategies: Array, currentStrategy: Object, items: Array });
+const props = defineProps({ strategies: Array, currentStrategy: Object, items: Array, kpis: Object, learningReport: Object });
 
 const previewFormat = ref('linkedin');
 const selectedItem = ref(null);
 const seoMode = ref(false);
+const detailTab = ref('preview'); // preview | seo | kpi
 
 // A/B-Varianten
 const variantGroup = ref(null);       // alle Items einer variant_group_id
@@ -19,9 +20,71 @@ const filteredItems = computed(() => {
 
 const formats = ['linkedin', 'newsletter', 'ad', 'blog'];
 
-function openItem(item) { selectedItem.value = item; seoMode.value = false; }
+function openItem(item) {
+    selectedItem.value = item;
+    seoMode.value = false;
+    detailTab.value = 'preview';
+    loadKpiForm(item);
+}
 function closeItem() { selectedItem.value = null; seoMode.value = false; }
 function toggleSeo() { seoMode.value = !seoMode.value; }
+
+// ─── KPI-Erfassung (Lernschleife) ───
+const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+const kpiSaving = ref(false);
+const kpiSaved = ref(false);
+const kpiError = ref('');
+const kpiForm = reactive({
+    measured_at: new Date().toISOString().slice(0, 10),
+    impressions: 0, reach: 0, clicks: 0,
+    likes: 0, comments: 0, shares: 0,
+    leads: 0, conversions: 0, revenue_eur: null,
+    open_rate: null, click_rate: null, notes: '',
+});
+
+// Vorbelegung aus bereits gespeicherter Messung
+function loadKpiForm(item) {
+    const existing = props.kpis?.[item?.id] || null;
+    Object.assign(kpiForm, {
+        measured_at: existing?.measured_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+        impressions: existing?.impressions ?? 0,
+        reach: existing?.reach ?? 0,
+        clicks: existing?.clicks ?? 0,
+        likes: existing?.likes ?? 0,
+        comments: existing?.comments ?? 0,
+        shares: existing?.shares ?? 0,
+        leads: existing?.leads ?? 0,
+        conversions: existing?.conversions ?? 0,
+        revenue_eur: existing?.revenue_eur ?? null,
+        open_rate: existing?.open_rate ?? null,
+        click_rate: existing?.click_rate ?? null,
+        notes: existing?.notes ?? '',
+    });
+    kpiError.value = ''; kpiSaved.value = false;
+}
+
+async function saveKpi() {
+    if (!selectedItem.value) return;
+    kpiSaving.value = true; kpiError.value = ''; kpiSaved.value = false;
+    try {
+        const res = await fetch('/api/content-kpis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body: JSON.stringify({ content_item_id: selectedItem.value.id, ...kpiForm }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { kpiError.value = data?.message || `HTTP ${res.status}`; return; }
+        kpiSaved.value = true; setTimeout(() => kpiSaved.value = false, 2500);
+        // Lokaler Status: Item ist jetzt live
+        const it = props.items.find(x => x.id === selectedItem.value.id);
+        if (it) it.status = 'live';
+        selectedItem.value.status = 'live';
+        // Board-Daten neu laden
+        router.reload({ only: ['kpis', 'learningReport', 'items'] });
+    } finally { kpiSaving.value = false; }
+}
+
+const hasKpis = computed(() => (props.learningReport?.measured_items || 0) > 0);
 
 // Alle Varianten einer Gruppe laden (aus props.items)
 function showVariants(groupId) {
@@ -78,6 +141,50 @@ function seoScore(item) {
       </div>
     </div>
 
+    <!-- Performance-Board (Lernschleife) -->
+    <div v-if="learningReport" class="mb-6 bg-white border border-gray-200 rounded-xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-900">📈 Performance-Learnings</h3>
+        <span class="text-xs text-gray-400">{{ learningReport.measured_items }} gemessene Posts · {{ learningReport.total_leads }} Leads · {{ learningReport.total_conversions }} Conversions</span>
+      </div>
+
+      <p v-if="!learningReport.measured_items" class="text-xs text-gray-500">
+        Noch keine KPIs erfasst. Öffne einen veröffentlichten Post → Tab „KPI“ → Zahlen eintragen.
+        Sobald mindestens 2 Posts pro Gruppe gemessen sind, beginnt das System zu lernen und
+        bevorzugt automatisch die Patterns/Formate/ICPs, die nachweislich funktionieren.
+      </p>
+
+      <template v-else>
+        <ul class="space-y-1.5">
+          <li v-for="(ins, idx) in learningReport.insights" :key="idx" class="text-xs text-gray-700 flex gap-2">
+            <span class="text-green-600">●</span> {{ ins }}
+          </li>
+        </ul>
+
+        <div v-if="Object.keys(learningReport.by_pattern || {}).length" class="mt-4">
+          <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Pattern-Ranking (Ø Erfolgsscore)</h4>
+          <div class="flex flex-wrap gap-2">
+            <span v-for="(agg, key) in learningReport.by_pattern" :key="key"
+              class="text-xs px-2.5 py-1 rounded-full border"
+              :class="key === Object.keys(learningReport.by_pattern)[0] ? 'bg-green-50 border-green-300 text-green-800 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-600'">
+              {{ key }} · {{ agg.avg_score }} <span class="opacity-60">({{ agg.samples }} Posts)</span>
+            </span>
+          </div>
+        </div>
+
+        <div v-if="Object.keys(learningReport.by_icp || {}).length" class="mt-3">
+          <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">ICP-Ranking</h4>
+          <div class="flex flex-wrap gap-2">
+            <span v-for="(agg, key) in learningReport.by_icp" :key="key"
+              class="text-xs px-2.5 py-1 rounded-full border"
+              :class="key === Object.keys(learningReport.by_icp)[0] ? 'bg-green-50 border-green-300 text-green-800 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-600'">
+              {{ key }} · {{ agg.avg_score }} <span class="opacity-60">({{ agg.samples }})</span>
+            </span>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- Format Tabs -->
     <div class="flex gap-1 mb-4">
       <button @click="previewFormat='all'" class="px-4 py-2 rounded-lg text-sm font-medium"
@@ -116,6 +223,10 @@ function seoScore(item) {
           <span class="text-xs text-gray-400">SEO: {{ seoScore(item) }}/5</span>
           <span class="text-xs text-gray-300">·</span>
           <span class="text-xs text-gray-400">{{ item.refinement_count || 0 }} Optimierungen</span>
+          <span v-if="kpis?.[item.id]" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+            :title="`Impressions: ${kpis[item.id].impressions} · Likes: ${kpis[item.id].likes} · Leads: ${kpis[item.id].leads}`">
+            📈 {{ kpis[item.id].leads > 0 ? kpis[item.id].leads + ' Leads' : kpis[item.id].impressions + ' Impr.' }}
+          </span>
         </div>
       </div>
       <div v-if="filteredItems.length===0" class="col-span-full text-center py-12 text-sm text-gray-500">
@@ -137,12 +248,13 @@ function seoScore(item) {
         </div>
 
         <div class="flex border-b border-gray-200">
-          <button @click="seoMode=false" class="flex-1 px-4 py-2 text-sm font-medium" :class="!seoMode?'text-green-600 border-b-2 border-green-600':'text-gray-500'">📝 Preview</button>
-          <button @click="seoMode=true" class="flex-1 px-4 py-2 text-sm font-medium" :class="seoMode?'text-green-600 border-b-2 border-green-600':'text-gray-500'">🔍 SEO</button>
+          <button @click="seoMode=false; detailTab='preview'" class="flex-1 px-4 py-2 text-sm font-medium" :class="detailTab==='preview'?'text-green-600 border-b-2 border-green-600':'text-gray-500'">📝 Preview</button>
+          <button @click="seoMode=true; detailTab='seo'" class="flex-1 px-4 py-2 text-sm font-medium" :class="detailTab==='seo'?'text-green-600 border-b-2 border-green-600':'text-gray-500'">🔍 SEO</button>
+          <button @click="detailTab='kpi'" class="flex-1 px-4 py-2 text-sm font-medium" :class="detailTab==='kpi'?'text-green-600 border-b-2 border-green-600':'text-gray-500'">📈 KPI (nach Publishing)</button>
         </div>
 
         <!-- Preview Mode -->
-        <div v-if="!seoMode" class="p-5">
+        <div v-if="detailTab==='preview'" class="p-5">
           <!-- LinkedIn -->
           <div v-if="selectedItem.preview?.linkedin" class="mb-6">
             <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">LinkedIn Preview</h4>
@@ -194,7 +306,7 @@ function seoScore(item) {
         </div>
 
         <!-- SEO Mode -->
-        <div v-else class="p-5">
+        <div v-else-if="detailTab==='seo'" class="p-5">
           <div class="space-y-4">
             <div class="grid grid-cols-3 gap-3">
               <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
@@ -238,6 +350,87 @@ function seoScore(item) {
                 <span v-if="!(selectedItem.persona?.content_attributes?.keywords || []).length" class="text-xs text-gray-500">Keine Keywords in Persona definiert</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- KPI Mode: Performance-Daten nach dem Publishing erfassen -->
+        <div v-else-if="detailTab==='kpi'" class="p-5">
+          <p class="text-xs text-gray-500 mb-4">
+            Trage die echten Zahlen nach dem Publishing ein. Das System lernt daraus:
+            Format × Pattern × Statement-Typ × ICP werden ausgewertet und die
+            Erkenntnisse fließen automatisch in künftige Generierungen ein.
+          </p>
+
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Messdatum</label>
+              <input type="date" v-model="kpiForm.measured_at" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Impressions</label>
+              <input type="number" min="0" v-model.number="kpiForm.impressions" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+          </div>
+
+          <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Interaktion</h4>
+          <div class="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Likes</label>
+              <input type="number" min="0" v-model.number="kpiForm.likes" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Kommentare</label>
+              <input type="number" min="0" v-model.number="kpiForm.comments" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Shares</label>
+              <input type="number" min="0" v-model.number="kpiForm.shares" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+          </div>
+
+          <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Conversion</h4>
+          <div class="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Klicks</label>
+              <input type="number" min="0" v-model.number="kpiForm.clicks" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Leads</label>
+              <input type="number" min="0" v-model.number="kpiForm.leads" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Conversions</label>
+              <input type="number" min="0" v-model.number="kpiForm.conversions" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Umsatz (€)</label>
+              <input type="number" min="0" step="0.01" v-model.number="kpiForm.revenue_eur" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Open Rate (%)</label>
+              <input type="number" min="0" max="100" step="0.1" v-model.number="kpiForm.open_rate" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800" placeholder="Newsletter">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Click Rate (%)</label>
+              <input type="number" min="0" max="100" step="0.1" v-model.number="kpiForm.click_rate" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800" placeholder="Newsletter">
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label class="block text-xs text-gray-400 mb-1">Notizen</label>
+            <textarea rows="2" v-model="kpiForm.notes" class="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-800" placeholder="z. B. in welchem Kontext gepostet, besondere Umstände…"></textarea>
+          </div>
+
+          <p v-if="kpiError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">⚠️ {{ kpiError }}</p>
+          <div class="flex items-center gap-3">
+            <button @click="saveKpi" :disabled="kpiSaving"
+              class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+              {{ kpiSaving ? 'Speichere…' : '💾 KPIs speichern (Item → live)' }}
+            </button>
+            <span v-if="kpiSaved" class="text-xs text-green-600">✓ Gespeichert — Learnings aktualisiert</span>
           </div>
         </div>
       </div>
