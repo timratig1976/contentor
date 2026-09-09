@@ -199,26 +199,70 @@ const generatingHint = computed(() => {
     return 'Dauert ungewöhnlich lang — bitte warten oder Reasoning-Effort senken.';
 });
 
-// ─── Editor-Aktionen ───
+// ─── Editor-Aktionen: KI-Überarbeitung mit Vorschlag + Genehmigung ───
 const editInstruction = ref('');
 const editLoading = ref(false);
+const editError = ref('');
+const editElapsed = ref(0);
+let editTimer = null;
+
+// Vergleichs-Modal: alter Text vs. KI-Vorschlag
+const editProposal = ref(null); // { before, after }
+
+const proposalDelta = computed(() => {
+    if (!editProposal.value) return '';
+    const d = editProposal.value.after.length - editProposal.value.before.length;
+    return d >= 0 ? `+${d} Zeichen` : `${d} Zeichen`;
+});
+
+function editHint() {
+    if (editElapsed.value < 8) return 'KI überarbeitet den Text…';
+    if (editElapsed.value < 20) return 'Noch einen Moment — Modell schreibt um…';
+    return 'Dauert länger als üblich — bitte warten.';
+}
 
 async function submitEdit() {
-    if (!editInstruction.value.trim() || !activePost.value) return;
+    if (!editInstruction.value.trim() || !activePost.value || editLoading.value) return;
     editLoading.value = true;
+    editError.value = '';
+    editElapsed.value = 0;
+    editTimer = setInterval(() => editElapsed.value++, 1000);
     try {
         const res = await fetch(`/api/content/${activePost.value.id}/assistant-edit`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
-            body: JSON.stringify({ instruction: editInstruction.value.trim(), apply: true }),
+            body: JSON.stringify({ instruction: editInstruction.value.trim(), apply: false }),
         });
-        const data = await res.json();
-        if (data.content_item) {
-            activePost.value.content = data.content_item.content;
-            activePost.value.status = data.content_item.status;
-        } else if (data.error) { alert('⚠️ ' + data.error); }
-    } catch (e) { alert('Fehler: ' + e.message); }
-    editLoading.value = false;
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.suggested) {
+            editError.value = data?.error || data?.message || `HTTP ${res.status}`;
+        } else {
+            // Vorschlag landet im Vergleichs-Modal, NICHTS wird gespeichert
+            editProposal.value = { before: activePost.value.content || '', after: data.suggested };
+        }
+    } catch (e) {
+        editError.value = 'Netzwerkfehler: ' + e.message;
+    } finally {
+        clearInterval(editTimer); editTimer = null;
+        editLoading.value = false;
+    }
+}
+
+// Vorschlag übernehmen: manuell speichern (Status bleibt, kein Auto-Abschuss)
+async function acceptProposal() {
+    if (!editProposal.value || !activePost.value) return;
+    activePost.value.content = editProposal.value.after;
+    editProposal.value = null;
     editInstruction.value = '';
+    await router.patch(`/api/content/${activePost.value.id}`, { content: activePost.value.content }, { preserveState: true });
+}
+
+function rejectProposal() { editProposal.value = null; }
+
+// Vorschlag nachbearbeiten: übernimmt den Vorschlag in den Editor, ohne zu speichern
+function editProposalManually() {
+    if (!editProposal.value || !activePost.value) return;
+    activePost.value.content = editProposal.value.after;
+    editProposal.value = null;
 }
 
 // Manuelles Editieren (direkt im Textarea) → speichern
@@ -371,18 +415,28 @@ onMounted(recommendStatement);
                             <button @click="saveManualEdit" class="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">💾 Manuelle Änderung speichern</button>
                         </div>
 
-                        <!-- Assistant-Edit -->
+                        <!-- KI-Überarbeitung (Vorschlag + Genehmigung) -->
                         <div class="mt-4 border-t border-gray-100 pt-3">
-                            <p class="text-xs text-gray-500 font-medium mb-2">🤖 Assistant-Anweisung:</p>
+                            <p class="text-xs text-gray-500 font-medium mb-2">🤖 KI-Überarbeitung <span class="text-gray-400 font-normal">— erzeugt einen Vorschlag zum Vergleich, nichts wird automatisch gespeichert</span></p>
                             <div class="flex gap-2">
-                                <input v-model="editInstruction" @keydown.enter="submitEdit"
-                                    class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-green-500"
+                                <input v-model="editInstruction" @keydown.enter="submitEdit" :disabled="editLoading"
+                                    class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-green-500 disabled:opacity-50"
                                     placeholder="z. B. Mach den Hook schärfer, kürze auf 800 Zeichen…" />
                                 <button @click="submitEdit" :disabled="editLoading || !editInstruction.trim()"
                                     class="px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                                    {{ editLoading ? '…' : 'Überarbeiten' }}
+                                    {{ editLoading ? editElapsed + 's…' : 'Vorschlag erzeugen' }}
                                 </button>
                             </div>
+                            <div v-if="editLoading" class="mt-2">
+                                <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+                                    <span>{{ editHint() }}</span>
+                                    <span class="font-mono tabular-nums">{{ editElapsed }}s</span>
+                                </div>
+                                <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div class="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (editElapsed / 30) * 100) + '%' }"></div>
+                                </div>
+                            </div>
+                            <p v-if="editError" class="mt-2 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">⚠️ {{ editError }}</p>
                         </div>
                     </div>
                 </template>
@@ -445,6 +499,43 @@ onMounted(recommendStatement);
                     class="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium disabled:opacity-50">
                     {{ generating ? 'Generiere… ' + elapsed + 's' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
                 </button>
+            </div>
+        </div>
+
+        <!-- Vergleichs-Modal: aktueller Text vs. KI-Vorschlag -->
+        <div v-if="editProposal" class="fixed inset-0 z-[60] flex items-start justify-center pt-8 overflow-y-auto">
+            <div class="fixed inset-0 bg-black/40" @click="rejectProposal"></div>
+            <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-6xl mx-4 mb-8 z-10">
+                <div class="flex items-center justify-between p-5 border-b border-gray-200">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">KI-Vorschlag vergleichen</h3>
+                        <p class="text-xs text-gray-500 mt-0.5">Anweisung: „{{ editInstruction }}“ · Änderung: {{ proposalDelta }}</p>
+                    </div>
+                    <button @click="rejectProposal" class="text-gray-400 hover:text-gray-900 text-xl">✕</button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-6">
+                    <div class="border border-gray-200 rounded-xl overflow-hidden flex flex-col">
+                        <div class="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                            <span class="text-xs font-semibold text-gray-500 uppercase">Aktuell (vorher)</span>
+                            <span class="text-xs text-gray-400">{{ editProposal.before.length }} Zeichen</span>
+                        </div>
+                        <pre class="p-4 text-sm text-gray-800 whitespace-pre-wrap font-serif max-h-96 overflow-y-auto flex-1">{{ editProposal.before }}</pre>
+                    </div>
+                    <div class="border border-green-300 rounded-xl overflow-hidden flex flex-col ring-2 ring-green-100">
+                        <div class="px-3 py-2 bg-green-50 border-b border-green-200 flex items-center justify-between">
+                            <span class="text-xs font-semibold text-green-700 uppercase">✨ KI-Vorschlag (nachher)</span>
+                            <span class="text-xs text-green-600">{{ editProposal.after.length }} Zeichen</span>
+                        </div>
+                        <pre class="p-4 text-sm text-gray-900 whitespace-pre-wrap font-serif max-h-96 overflow-y-auto flex-1">{{ editProposal.after }}</pre>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-3 px-6 pb-6">
+                    <button @click="rejectProposal" class="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">✗ Verwerfen</button>
+                    <button @click="editProposalManually" class="px-4 py-2 text-sm rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">✎ Im Editor nachbearbeiten</button>
+                    <button @click="acceptProposal" class="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium">✓ Übernehmen & speichern</button>
+                </div>
             </div>
         </div>
     </AppLayout>
