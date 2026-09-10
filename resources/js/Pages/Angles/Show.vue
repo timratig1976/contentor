@@ -14,7 +14,11 @@ const status = ref(props.angle.status);
 const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
 async function setStatus() {
     if (status.value === props.angle.status) return;
-    await router.patch(`/api/angles/${props.angle.id}`, { status: status.value }, { preserveState: true });
+    await fetch(`/api/angles/${props.angle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ status: status.value }),
+    });
     props.angle.status = status.value;
 }
 
@@ -52,9 +56,17 @@ function barColor(key) {
     const v = rankings.value[key] || 0;
     return v === 3 ? 'bg-indigo-500' : v === 2 ? 'bg-indigo-300' : 'bg-indigo-200';
 }
-function updateRanking() {
+async function updateRanking() {
     saving.value = true;
-    router.patch(`/api/angles/${props.angle.id}`, rankings.value, { preserveState: true, onFinish: () => saving.value = false });
+    try {
+        await fetch(`/api/angles/${props.angle.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify(rankings.value),
+        });
+    } finally {
+        saving.value = false;
+    }
 }
 
 // ─── Produzieren-Controls (kompakt) ───
@@ -70,6 +82,11 @@ const formatLabels = {
     linkedin_post: 'LinkedIn Post', ad_copy: 'Ad Copy',
     newsletter_acquisition: 'Newsletter', newsletter_bk: 'Newsletter BK',
     landing_page_headlines: 'Landing Page', blog_post: 'Blog Post',
+};
+const formatIcons = {
+    linkedin_post: '💼', ad_copy: '📣',
+    newsletter_acquisition: '📧', newsletter_bk: '💌',
+    landing_page_headlines: '🌐', blog_post: '📰',
 };
 const formatDesc = {
     linkedin_post: 'Hook → Mechanismus → Beweis → Soft-CTA.',
@@ -300,7 +317,11 @@ async function acceptProposal() {
     activePost.value.content = editProposal.value.after;
     editProposal.value = null;
     editInstruction.value = '';
-    await router.patch(`/api/content/${activePost.value.id}`, { content: activePost.value.content }, { preserveState: true });
+    await fetch(`/api/content/${activePost.value.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ content: activePost.value.content }),
+    });
 }
 
 function rejectProposal() { editProposal.value = null; }
@@ -372,7 +393,11 @@ watch(activePostId, () => { imageIdeas.value = []; selectedIdea.value = null; im
 // Manuelles Editieren (direkt im Textarea) → speichern
 async function saveManualEdit() {
     if (!activePost.value) return;
-    await router.patch(`/api/content/${activePost.value.id}`, { content: activePost.value.content }, { preserveState: true });
+    await fetch(`/api/content/${activePost.value.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ content: activePost.value.content }),
+    });
 }
 
 async function approveToOutput(p) {
@@ -386,16 +411,32 @@ async function approveToOutput(p) {
             }
         }
     } else {
-        await router.patch(`/api/content/${p.id}`, { status: 'geplant' }, { preserveState: true });
+        await fetch(`/api/content/${p.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ status: 'geplant' }),
+        });
         p.status = 'geplant';
     }
     // aktive (nicht verworfene) bleiben im Editor sichtbar
     posts.value = posts.value.filter(x => x.status !== 'verworfen');
 }
 
-function dismiss(p) {
-    p.status = 'verworfen';
-    posts.value = posts.value.filter(x => x.status !== 'verworfen');
+// Verwerfen/Löschen mit Bestätigung
+const dismissTarget = ref(null);  // Post, der gelöscht werden soll
+function askDismiss(p) { dismissTarget.value = p; }
+function cancelDismiss() { dismissTarget.value = null; }
+async function confirmDismiss() {
+    const p = dismissTarget.value;
+    dismissTarget.value = null;
+    if (!p) return;
+    try {
+        await fetch(`/api/content/${p.id}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+        });
+    } catch { /* lokale Entfernung trotzdem durchführen */ }
+    posts.value = posts.value.filter(x => x.id !== p.id);
     if (activePostId.value === p.id) activePostId.value = posts.value[0]?.id || null;
 }
 
@@ -486,10 +527,11 @@ onMounted(recommendStatement);
                     <!-- Varianten-Tabs -->
                     <div class="flex items-center gap-2 flex-wrap">
                         <button v-for="p in posts" :key="p.id" @click="selectPost(p)"
-                            class="px-3 py-1.5 rounded-lg text-xs border"
-                            :class="activePostId === p.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'">
-                            {{ p.variant_pattern || 'Variante' }}
-                            <span v-if="p.status === 'geplant'" class="ml-1 text-green-400">✓</span>
+                            class="px-3 py-1.5 rounded-full text-xs border transition-colors"
+                            :class="activePostId === p.id ? 'bg-gray-200 text-gray-900 border-gray-300 shadow-sm' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100 hover:text-gray-700'">
+                            <span class="mr-1">{{ formatIcons[p.format] || '📄' }}</span>
+                            <span class="font-medium">{{ p.variant_pattern || 'Variante' }}</span>
+                            <span v-if="p.status === 'geplant'" class="ml-1 text-green-600">✓</span>
                         </button>
                     </div>
 
@@ -514,11 +556,7 @@ onMounted(recommendStatement);
                                 </span>
                             </div>
                             <div class="flex gap-2">
-                                <button @click="dismiss(activePost)" class="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600">Verwerfen</button>
-                                <button @click="approveToOutput(activePost)" :disabled="activePost.status === 'geplant'"
-                                    class="text-xs px-3 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
-                                    {{ activePost.status === 'geplant' ? '✓ In Output' : '→ Zum Output' }}
-                                </button>
+                                <button @click="askDismiss(activePost)" class="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-red-600">Verwerfen</button>
                             </div>
                         </div>
 
@@ -565,9 +603,8 @@ onMounted(recommendStatement);
                         <textarea v-model="activePost.content" rows="22"
                             class="w-full bg-white border border-gray-200 rounded-lg p-5 text-[15px] text-gray-900 leading-relaxed font-serif resize-y focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-200"
                             placeholder="Post-Text…"></textarea>
-                        <div class="flex items-center justify-between mt-2">
+                        <div class="flex items-center justify-between mt-2 mb-3">
                             <span class="text-xs text-gray-400">{{ (activePost.content || '').length }} Zeichen</span>
-                            <button @click="saveManualEdit" class="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">💾 Manuelle Änderung speichern</button>
                         </div>
 
                         <!-- KI-Überarbeitung (Vorschlag + Genehmigung) -->
@@ -578,8 +615,8 @@ onMounted(recommendStatement);
                                     class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-green-500 disabled:opacity-50"
                                     placeholder="z. B. Mach den Hook schärfer, kürze auf 800 Zeichen…" />
                                 <button @click="submitEdit" :disabled="editLoading || !editInstruction.trim()"
-                                    class="px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                                    {{ editLoading ? editElapsed + 's…' : 'Vorschlag erzeugen' }}
+                                    class="px-3.5 py-2 text-xs font-medium bg-white text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-50 transition-colors">
+                                    {{ editLoading ? editElapsed + 's…' : '✨ Vorschlag erzeugen' }}
                                 </button>
                             </div>
                             <div v-if="editLoading" class="mt-2">
@@ -588,7 +625,7 @@ onMounted(recommendStatement);
                                     <span class="font-mono tabular-nums">{{ editElapsed }}s</span>
                                 </div>
                                 <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                    <div class="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (editElapsed / 30) * 100) + '%' }"></div>
+                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (editElapsed / 30) * 100) + '%' }"></div>
                                 </div>
                             </div>
                             <p v-if="editError" class="mt-2 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">⚠️ {{ editError }}</p>
@@ -599,7 +636,7 @@ onMounted(recommendStatement);
                             <div class="flex items-center justify-between mb-2">
                                 <p class="text-xs text-gray-500 font-medium">🎨 Passendes Bild <span class="text-gray-400 font-normal">— Ideen aus dem finalen Text, du wählst</span></p>
                                 <button @click="requestImageIdeas" :disabled="imageIdeasLoading || imageGenLoading"
-                                    class="text-xs px-2.5 py-1 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+                                    class="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 disabled:opacity-50 transition-colors">
                                     {{ imageIdeasLoading ? 'Ideen kommen…' : (imageIdeas.length ? '↻ Neue Ideen' : '💡 Bildideen entwickeln') }}
                                 </button>
                             </div>
@@ -618,23 +655,37 @@ onMounted(recommendStatement);
                             <div v-if="imageIdeas.length" class="grid grid-cols-1 md:grid-cols-3 gap-2">
                                 <div v-for="(idea, i) in imageIdeas" :key="i"
                                     class="border rounded-lg p-2.5 flex flex-col"
-                                    :class="selectedIdea?.title === idea.title ? 'border-purple-400 bg-purple-50/50 ring-1 ring-purple-200' : 'border-gray-200 bg-white'">
+                                    :class="selectedIdea?.title === idea.title ? 'border-emerald-400 bg-emerald-50/50 ring-1 ring-emerald-200' : 'border-gray-200 bg-white'">
                                     <p class="text-xs font-semibold text-gray-800 mb-1">{{ i + 1 }}. {{ idea.title }}</p>
                                     <p class="text-[11px] text-gray-500 leading-snug mb-1 flex-1">{{ idea.concept }}</p>
-                                    <p class="text-[10px] text-purple-600 mb-2">🎭 {{ idea.mood }}</p>
+                                    <p class="text-[10px] text-emerald-600 mb-2">🎭 {{ idea.mood }}</p>
                                     <button @click="generateFromIdea(idea)" :disabled="imageGenLoading"
-                                        class="text-[11px] px-2 py-1 rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+                                        class="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
                                         {{ imageGenLoading && selectedIdea?.title === idea.title ? '🎨 Erzeuge… ' + imageGenElapsed + 's' : '🎨 Bild generieren' }}
                                     </button>
                                 </div>
                             </div>
                             <div v-if="imageGenLoading" class="mt-2">
                                 <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                    <div class="h-full bg-purple-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (imageGenElapsed / 25) * 100) + '%' }"></div>
+                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: Math.min(95, (imageGenElapsed / 25) * 100) + '%' }"></div>
                                 </div>
                                 <p class="text-[10px] text-gray-400 mt-1">Bildgenerierung dauert ~5–25s (Gemini Image). Kosten pro Bild ≈ $0.04.</p>
                             </div>
                             <p v-if="imageGenError" class="mt-2 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">⚠️ {{ imageGenError }}</p>
+                        </div>
+
+                        <!-- Finale Aktionen: Speichern → Zum Output -->
+                        <div class="mt-5 pt-4 border-t border-gray-100">
+                            <div class="flex items-center justify-end gap-2.5">
+                                <button @click="saveManualEdit"
+                                    class="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors">
+                                    💾 Speichern
+                                </button>
+                                <button @click="approveToOutput(activePost)" :disabled="activePost.status === 'geplant'"
+                                    class="px-5 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors shadow-sm">
+                                    {{ activePost.status === 'geplant' ? '✓ In Output' : '→ Zum Output' }}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -741,6 +792,22 @@ onMounted(recommendStatement);
                     <button @click="rejectProposal" class="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">✗ Verwerfen</button>
                     <button @click="editProposalManually" class="px-4 py-2 text-sm rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">✎ Im Editor nachbearbeiten</button>
                     <button @click="acceptProposal" class="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 font-medium">✓ Übernehmen & speichern</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Verwerfen-Bestätigung Modal -->
+        <div v-if="dismissTarget" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/40" @click="cancelDismiss"></div>
+            <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md z-10 p-6">
+                <h3 class="text-lg font-semibold text-gray-900">Post wirklich verwerfen?</h3>
+                <p class="text-sm text-gray-600 mt-2 leading-relaxed">
+                    „{{ dismissTarget.title || (dismissTarget.content || '').slice(0, 80) }}“ wird <span class="font-semibold text-red-600">dauerhaft gelöscht</span>
+                    — auch aus dem Output und Redaktionsplan. Das kann nicht rückgängig gemacht werden.
+                </p>
+                <div class="flex items-center justify-end gap-3 mt-6">
+                    <button @click="cancelDismiss" class="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Abbrechen</button>
+                    <button @click="confirmDismiss" class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 font-medium">🗑️ Endgültig löschen</button>
                 </div>
             </div>
         </div>

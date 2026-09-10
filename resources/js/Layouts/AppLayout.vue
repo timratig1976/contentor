@@ -37,6 +37,7 @@ const navSections = [
 
 const bottomNav = [
     { name: 'Agents', href: '/agents', icon: '🤖' },
+    { name: 'LLM-Logs', href: '/logs', icon: '🗂️' },
     { name: 'Monitoring', href: '/monitoring', icon: '📡' },
     { name: 'Einstellungen', href: '/einstellungen', icon: '⚙️' },
 ];

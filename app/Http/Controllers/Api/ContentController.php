@@ -263,7 +263,7 @@ class ContentController extends Controller
             'angle_id' => $angle->id,
             'type' => 'post',
             'format' => $params['format'],
-            'title' => mb_substr($angle->angle, 0, 80),
+            'title' => $this->deriveTitle($content, $params['format'], $angle),
             'content' => $content,
             'status' => 'in_produktion',
             'icp' => $angle->icp,
@@ -310,9 +310,26 @@ class ContentController extends Controller
             'persona_id' => 'sometimes|string',
         ]);
 
+        // Hashtag-Spam bereinigen (defensiv bei jeder Content-Änderung)
+        if (!empty($validated['content'])) {
+            $validated['content'] = $this->rulesService->sanitizeHashtags($validated['content']);
+        }
+
         $contentItem->update($validated);
 
         return response()->json($contentItem->load(['strategy', 'angle', 'media']));
+    }
+
+    /**
+     * Löscht einen Content-Item dauerhaft (inkl. zugehöriger Medien und KPIs).
+     * Wird vom Editor-„Verwerfen" genutzt, damit der verworfenen Post auch
+     * aus dem Output/Redaktionsplan verschwindet (statt nur den Status zu setzen).
+     */
+    public function destroy(ContentItem $contentItem): JsonResponse
+    {
+        $contentItem->delete();
+
+        return response()->json(['deleted' => $contentItem->id]);
     }
 
     /**
@@ -332,7 +349,9 @@ class ContentController extends Controller
             . "Behalte Format, Länge und Stil bei. Gib NUR den fertigen überarbeiteten Text aus "
             . "(keine Erklärungen, keine Meta-Kommentare).";
 
-        $result = $this->llm->chat('assistant', 'Du bist ein B2B-Content-Redakteur.', [
+        $result = $this->llm->chat('assistant', 'Du bist ein B2B-Content-Redakteur. '
+            . 'Schreibe sachlich und ohne Floskeln. '
+            . 'Falls der Text Hashtags enthält, nutze maximal 5 kurze, relevante Hashtags am Ende — niemals lange Hashtag-Ketten oder doppelte Hashtags.', [
             ['role' => 'user', 'content' => $prompt],
         ], ['timeout' => 90]);
 
@@ -341,6 +360,15 @@ class ContentController extends Controller
         }
 
         $text = trim($result['text']);
+
+        // Guardrail: Tonalität + Hashtag-Spam bereinigen (wie im Produktionspfad)
+        $strategyCtx = [];
+        foreach ($contentItem->strategy?->contentStrategies ?? [] as $s) {
+            $strategyCtx[$s->key] = $s->content;
+        }
+        if ($contentItem->strategy) {
+            $text = $this->rulesService->enforceTone($text, $contentItem->format, $contentItem->strategy, $strategyCtx);
+        }
 
         $applied = false;
         if ($validated['apply'] ?? true) {
@@ -567,7 +595,7 @@ class ContentController extends Controller
             ],
             'blog_post' => [
                 'word_count' => ['min' => 400, 'max' => 800],
-                'structure' => ['Einleitung (Hook + These)', '2-4 Absätze mit je einem Punkt', 'Fazit + CTA'],
+                'structure' => ['Titel (H1, einprägsam, max 60 Zeichen)', 'Einleitung (Hook + These)', '2-4 Absätze mit je einem Punkt', 'Fazit + CTA'],
                 'cta_style' => 'CTA am Ende',
             ],
             default => [],
@@ -726,10 +754,60 @@ class ContentController extends Controller
             $lines[] = "Hashtags am Ende: " . implode(' ', array_slice($hashtags, 0, 5));
         }
 
+        if ($format === 'blog_post') {
+            $lines[] = "";
+            $lines[] = "Gib in der ERSTEN Zeile den Blog-Titel (H1, einprägsam, max 60 Zeichen) aus, "
+                . "danach eine Leerzeile und anschließend den Fließtext. "
+                . "Der Titel darf NICHT identisch mit der Angle-Formulierung sein.";
+        }
+
         $lines[] = "";
         $lines[] = "Gib NUR den Content-Text aus.";
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Leitet den Anzeige-Titel eines ContentItems aus dem generierten Text ab.
+     *
+     * - blog_post:  erster Absatz (H1), den das Modell oben ausgibt — ist ein
+     *               echter Titel, keine Kopie des Angles.
+     * - newsletter: Betreff (erste Zeile)
+     * - ad_copy:    Headline (zweite Zeile bei "Primary Text\nHeadline\n...")
+     * - landing_page_headlines: Hero Headline (erste Zeile)
+     * - linkedin_post & Rest: kurzer interner Label-Auszug aus dem Hook
+     *   (kein Link-Detail; LinkedIn hat keinen separaten Headline-Slot).
+     */
+    private function deriveTitle(string $content, string $format, Angle $angle): string
+    {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $content))));
+
+        if ($format === 'blog_post') {
+            $title = isset($lines[0]) && str_starts_with($lines[0], '#')
+                ? ltrim($lines[0], '# ')
+                : ($lines[0] ?? '');
+            if ($title !== '') {
+                return mb_substr($title, 0, 120);
+            }
+        }
+
+        if (in_array($format, ['newsletter_acquisition', 'newsletter_bk'], true)) {
+            return mb_substr($lines[0] ?? mb_substr($angle->angle, 0, 80), 0, 120);
+        }
+
+        if ($format === 'ad_copy') {
+            return mb_substr($lines[1] ?? $lines[0] ?? '', 0, 120);
+        }
+
+        if ($format === 'landing_page_headlines') {
+            return mb_substr($lines[0] ?? '', 0, 120);
+        }
+
+        // LinkedIn & übrige: erster Satz/Hook als interner Label-Auszug
+        $firstLine = $lines[0] ?? $angle->angle;
+        $firstSentence = preg_split('/(?<=[.!?])\s+/', $firstLine)[0] ?? $firstLine;
+
+        return mb_substr($firstSentence, 0, 80);
     }
 
     private function generateContent(Angle $angle, array $params, array $strategyCtx, ?array $personaCtx = null): string

@@ -250,7 +250,48 @@ class ContentRulesService
         // Leerzeichen vor Newlines entfernen
         $output = preg_replace('/[ \t]+\n/', "\n", $output);
 
+        // Hashtag-Spam verhindern: Duplikate entfernen & auf max. 5 kappen
+        $output = $this->sanitizeHashtags($output);
+
         return trim($output);
+    }
+
+    /**
+     * Entfernt doppelte Hashtags und begrenzt sie auf eine sinnvolle Anzahl
+     * (Default: 5). Verhindert, dass ein KI-Modell im Enhancement-Pfad
+     * Dutzende gleichlautende Hashtags anhängt.
+     *
+     * Die bereinigten Hashtags werden als eine Zeile am Textende gesetzt.
+     */
+    public function sanitizeHashtags(string $text, int $max = 5): string
+    {
+        preg_match_all('/#[\p{L}\p{N}_]+/u', $text, $matches);
+        if (empty($matches[0])) {
+            return $text;
+        }
+
+        // Dedupe case-insensitive, Reihenfolge beibehalten
+        $seen = [];
+        $unique = [];
+        foreach ($matches[0] as $tag) {
+            $key = mb_strtolower($tag);
+            if (! isset($seen[$key])) {
+                $seen[$key] = true;
+                $unique[] = $tag;
+            }
+        }
+        $hashtags = array_slice($unique, 0, max(1, $max));
+
+        // Alle Hashtags aus dem Text entfernen
+        $cleaned = preg_replace('/\s*#[\p{L}\p{N}_]+/u', '', $text);
+        $cleaned = preg_replace('/\n{3,}/', "\n\n", $cleaned);
+        $cleaned = trim($cleaned);
+
+        if ($hashtags === []) {
+            return $cleaned;
+        }
+
+        return $cleaned . ($cleaned !== '' ? "\n\n" : '') . implode(' ', $hashtags);
     }
 
     /**

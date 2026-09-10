@@ -52,6 +52,20 @@ class OutputPageController extends Controller
         $content = $item->content ?? '';
         $lines = explode("\n", $content);
 
+        // Blog: erste Zeile ist der H1-Titel, Rest ist der Fließtext
+        $blogBody = $content;
+        $blogTitle = $item->title;
+        if ($item->format === 'blog_post') {
+            $firstLine = trim($lines[0] ?? '');
+            if (! preg_match('/^#/', $firstLine)) {
+                // Erste Zeile ist ein reiner Text-Headline (kein Markdown "#")
+                $blogTitle = $firstLine !== '' ? $firstLine : $blogTitle;
+                $blogBody = implode("\n", array_slice($lines, 1));
+            } else {
+                $blogBody = $content;
+            }
+        }
+
         return [
             'linkedin' => [
                 'author' => $persona?->name ?? $item->strategy->name,
@@ -72,9 +86,9 @@ class OutputPageController extends Controller
                 'cta' => 'Mehr erfahren',
             ],
             'blog' => [
-                'title' => $item->title ?? $lines[0] ?? '',
-                'excerpt' => mb_substr($content, 0, 200),
-                'body' => $content,
+                'title' => $blogTitle,
+                'excerpt' => mb_substr($blogBody, 0, 200),
+                'body' => $blogBody,
             ],
         ];
     }

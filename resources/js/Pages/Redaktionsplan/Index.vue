@@ -40,8 +40,10 @@ function switchStrategy(strategyKey) {
 }
 
 function moveCard(itemId, newStatus) {
-    router.patch(`/api/content/${itemId}`, { status: newStatus }, {
-        preserveState: true,
+    fetch(`/api/content/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ status: newStatus }),
     });
 }
 

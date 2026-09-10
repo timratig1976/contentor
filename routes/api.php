@@ -44,6 +44,7 @@ Route::get('/content', [ContentController::class, 'index']);
 Route::patch('/content/{contentItem}', [ContentController::class, 'update']);
 Route::post('/content/{contentItem}/select-variant', [ContentController::class, 'selectVariant']);
 Route::post('/content/{contentItem}/assistant-edit', [ContentController::class, 'assistantEdit']);
+Route::delete('/content/{contentItem}', [ContentController::class, 'destroy']);
 Route::get('/content/overview', [ContentController::class, 'overview']);
 Route::get('/content/{contentItem}/preview', [ContentController::class, 'preview']);
 

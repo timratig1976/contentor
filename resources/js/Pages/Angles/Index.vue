@@ -49,14 +49,22 @@ const statusClasses = {
 
 async function del(angle) {
     if (!confirm('Angle wirklich löschen?')) return;
-    await router.delete(`/api/angles/${angle.id}`, { preserveState: true });
+    await fetch(`/api/angles/${angle.id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'X-Requested-With': 'XMLHttpRequest' },
+    });
 }
 
 const statusOptions = ['neu', 'bewertet', 'approved', 'verworfen'];
 
 async function setStatus(angle, status) {
     if (status === angle.status) return;
-    await router.patch(`/api/angles/${angle.id}`, { status }, { preserveState: true });
+    await fetch(`/api/angles/${angle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ status }),
+    });
+    angle.status = status;
 }
 </script>
 

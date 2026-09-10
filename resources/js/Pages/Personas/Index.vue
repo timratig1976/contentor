@@ -1,6 +1,5 @@
 <script setup>
 import { ref, reactive } from 'vue';
-import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 const props = defineProps({ strategies: Array, personas: Array });
@@ -22,8 +21,8 @@ const form = reactive(emptyForm());
 function openNew() { editingId.value = null; Object.assign(form, emptyForm()); activeTab.value = 'form'; }
 function openEdit(p) { editingId.value = p.id; form.strategy = p.strategies?.[0]?.key || p.strategy?.key || ''; form.name = p.name; form.role = p.role || ''; form.voice = p.voice || ''; form.positioning = p.positioning || ''; form.core_statements = [...(p.core_statements || [])]; form.tonality = { style: 'direkt', do: [], dont: [], ...(p.tonality || {}) }; form.content_attributes = { maxLength: 2000, formats: ['linkedin_post'], tone: 'direkt', keywords: [], ...(p.content_attributes || {}) }; form.cadence = p.cadence || 'weekly'; form.channel_strategies = p.channel_strategies ? JSON.parse(JSON.stringify(p.channel_strategies)) : []; form.active = p.active ?? true; form.forbidden_words = [...(p.forbidden_words || [])]; form.max_sentence_length = p.max_sentence_length ?? null; form.emoji_usage = p.emoji_usage || 'none'; form.perspective = p.perspective || 'ich'; activeTab.value = 'form'; }
 function closeForm() { activeTab.value = 'list'; }
-async function save() { saving.value = true; try { const payload = { ...form }; if (!payload.strategy) delete payload.strategy; if (editingId.value) { await router.patch(`/api/personas/${editingId.value}`, payload, { preserveState: true, onSuccess: closeForm }); } else { await router.post('/api/personas', payload, { preserveState: true, onSuccess: closeForm }); } } finally { saving.value = false; } }
-async function del(id) { if (!confirm('Persona löschen?')) return; await router.delete(`/api/personas/${id}`, { preserveState: true }); }
+async function save() { saving.value = true; try { const payload = { ...form }; if (!payload.strategy) delete payload.strategy; await fetch(editingId.value ? `/api/personas/${editingId.value}` : '/api/personas', { method: editingId.value ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(payload) }); closeForm(); } finally { saving.value = false; } }
+async function del(id) { if (!confirm('Persona löschen?')) return; await fetch(`/api/personas/${id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '', 'X-Requested-With': 'XMLHttpRequest' } }); }
 function addItem(f) { if (!form[f]) form[f] = []; form[f].push(''); }
 function addKeyword() { if (!form.content_attributes.keywords) form.content_attributes.keywords = []; form.content_attributes.keywords.push(''); }
 function addChannel() { form.channel_strategies.push({ channel: 'linkedin', frequency: 'weekly', content_mix: { thought_leadership: 40, case_study: 20, how_to: 20, personal: 20 } }); }
