@@ -118,7 +118,7 @@ class QuickInputController extends Controller
     private function storeFromFile(Request $request)
     {
         $validated = $request->validate([
-            'file' => 'required|file|mimes:pdf,txt,md,doc,docx|max:10240',
+            'file' => 'required|file|mimes:pdf,txt,md,doc,docx,png,jpg,jpeg,webp|max:10240',
             'title' => 'nullable|string|max:255',
             'strategy' => 'required|string|exists:strategies,key',
             'batch_key' => 'nullable|string',
@@ -135,6 +135,8 @@ class QuickInputController extends Controller
             $parser = new Parser();
             $pdf = $parser->parseFile($file->getPathname());
             $content = $pdf->getText();
+        } elseif (in_array($extension, ['png', 'jpg', 'jpeg', 'webp'], true)) {
+            return $this->storeFromImage($request, $validated, $strategy, $file);
         } else {
             $content = file_get_contents($file->getPathname());
         }
@@ -157,6 +159,55 @@ class QuickInputController extends Controller
         ]);
 
         $result = ['source' => $source->load('strategy'), 'drafts' => []];
+
+        if ($validated['create_angles'] ?? true) {
+            $result['drafts'] = $this->extractDraftAngles($content, $strategy, (int) ($validated['num_angles'] ?? 5));
+        }
+
+        if ($request->header('X-Inertia')) {
+            return redirect()->route('quellen');
+        }
+
+        return response()->json($result, 201);
+    }
+
+    /**
+     * Bild-Upload: OCR via EdenAI → erkannter Text wird zur Quelle mit Angle-Drafts.
+     */
+    private function storeFromImage(Request $request, array $validated, Strategy $strategy, $file): JsonResponse
+    {
+        if (! $this->webService->configured()) {
+            return response()->json(['error' => 'EdenAI-Key fehlt — OCR nicht möglich (Einstellungen).'], 422);
+        }
+
+        // Bild auf Disk speichern (für späteres Re-OCR + Nachvollziehbarkeit)
+        $path = $file->store('sources/screenshots', 'public');
+        $absPath = storage_path('app/public/' . $path);
+
+        $ocr = $this->webService->ocr($absPath);
+        if (! $ocr['success']) {
+            return response()->json(['error' => 'OCR fehlgeschlagen: ' . $ocr['error']], 502);
+        }
+
+        $content = trim((string) ($ocr['text'] ?? ''));
+        if (mb_strlen($content) < 20) {
+            return response()->json(['error' => 'Kein verwertbarer Text im Bild erkannt.'], 422);
+        }
+
+        $title = $validated['title'] ?? ($file->getClientOriginalName() . ' (OCR)');
+
+        $source = Source::create([
+            'title' => $title,
+            'type' => 'screenshot',
+            'strategy_id' => $strategy->id,
+            'visibility' => 'intern',
+            'file_ref' => $path,
+            'batch_key' => $validated['batch_key'] ?? 'ocr-' . now()->format('Ymd'),
+            'raw_content' => $content,
+            'meta' => ['ocr_hash' => md5($content), 'last_ocr_at' => now()->toIso8601String()],
+        ]);
+
+        $result = ['source' => $source->load('strategy'), 'drafts' => [], 'ocr' => true];
 
         if ($validated['create_angles'] ?? true) {
             $result['drafts'] = $this->extractDraftAngles($content, $strategy, (int) ($validated['num_angles'] ?? 5));

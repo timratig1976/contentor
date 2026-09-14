@@ -31,14 +31,27 @@ class SourceController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $type = (string) $request->input('type', '');
+        $urlRule = in_array($type, ['rss', 'url'], true) ? 'required|url' : 'nullable|url';
+
         $validated = $request->validate([
             'title' => 'required|string|max:255',
-            'type' => 'required|in:pdf,url,interview,intern,research',
+            'type' => 'required|in:pdf,url,interview,intern,research,rss,community,screenshot',
             'strategy' => 'required|string|exists:strategies,key',
             'visibility' => 'string|in:intern,extern,partner',
             'file_ref' => 'nullable|string',
             'batch_key' => 'nullable|string',
-            'url' => 'nullable|url',
+            'url' => $urlRule,
+            'monitor' => 'nullable|boolean',
+            'frequency' => 'nullable|in:daily,weekly,biweekly',
+            // RSS / Community-Metadaten
+            'meta' => 'nullable|array',
+            'meta.subreddit' => 'nullable|string|max:100',
+            'meta.provider' => 'nullable|in:reddit,hackernews',
+            'meta.query' => 'nullable|string|max:255',
+            'meta.min_score' => 'nullable|integer|min:0|max:1000',
+            'meta.keywords' => 'nullable|array',
+            'meta.keywords.*' => 'string|max:100',
         ]);
 
         $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
@@ -51,9 +64,21 @@ class SourceController extends Controller
             'file_ref' => $validated['file_ref'] ?? null,
             'batch_key' => $validated['batch_key'] ?? null,
             'url' => $validated['url'] ?? null,
+            'monitor' => $validated['monitor'] ?? in_array($validated['type'], ['rss', 'community'], true),
+            'frequency' => $validated['frequency'] ?? 'daily',
+            'meta' => $validated['meta'] ?? null,
         ]);
 
-        return response()->json($source, 201);
+        // Bei RSS/Community: sofort erster Fetch (Items in Queue stellen)
+        $firstFetch = null;
+        if (in_array($source->type, ['rss', 'community'], true)) {
+            $firstFetch = app(\App\Services\SourceIntelligenceService::class)->check($source);
+        }
+
+        return response()->json(array_merge(
+            ['source' => $source->load('strategy')],
+            $firstFetch ? ['first_fetch' => $firstFetch] : []
+        ), 201);
     }
 
     public function angles(Source $source): JsonResponse

@@ -26,6 +26,13 @@ const urlForm = reactive({
     monitor: false, frequency: 'weekly',
 });
 
+const rssForm = reactive({
+    url: '', title: '',
+    strategy: props.strategies?.[0]?.key || 'viscale',
+    frequency: 'daily',
+});
+const rssResult = ref(null);
+
 const pdfForm = reactive({
     file: null, title: '',
     strategy: props.strategies?.[0]?.key || 'viscale',
@@ -153,6 +160,33 @@ async function submitPdf() {
     finally { loading.value = false; }
 }
 
+// ─── RSS-Feed als Quelle anlegen (sofort erster Fetch) ───
+async function submitRss() {
+    if (!rssForm.url.trim()) return;
+    loading.value = true; rssResult.value = null; result.value = null; drafts.value = [];
+    try {
+        const res = await fetch('/api/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body: JSON.stringify({
+                title: rssForm.title || rssForm.url,
+                type: 'rss',
+                strategy: rssForm.strategy,
+                url: rssForm.url,
+                monitor: true,
+                frequency: rssForm.frequency,
+            }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            rssResult.value = data;
+        } else {
+            rssResult.value = { error: data.message?.url?.[0] || data.message || 'Fehler beim Anlegen des Feeds. Bitte URL prüfen.' };
+        }
+    } catch (e) { rssResult.value = { error: 'Netzwerkfehler: ' + e.message }; }
+    loading.value = false;
+}
+
 function onFileChange(e) { pdfForm.file = e.target.files[0]; }
 const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', note: '📌', quote: '💬', interview: '🎤' };
 </script>
@@ -167,8 +201,9 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
 
       <div class="flex gap-1 mb-6">
         <button @click="mode='text'" class="px-4 py-2 rounded-lg text-sm font-medium" :class="mode==='text'?'bg-white border border-gray-200 text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-900'">Text / Artikel</button>
-        <button @click="mode='pdf'" class="px-4 py-2 rounded-lg text-sm font-medium" :class="mode==='pdf'?'bg-white border border-gray-200 text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-900'">PDF / Datei</button>
+        <button @click="mode='pdf'" class="px-4 py-2 rounded-lg text-sm font-medium" :class="mode==='pdf'?'bg-white border border-gray-200 text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-900'">PDF / Datei / Bild</button>
         <button @click="mode='url'" class="px-4 py-2 rounded-lg text-sm font-medium" :class="mode==='url'?'bg-white border border-gray-200 text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-900'">URL</button>
+        <button @click="mode='rss'" class="px-4 py-2 rounded-lg text-sm font-medium" :class="mode==='rss'?'bg-white border border-gray-200 text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-900'">📶 RSS-Feed</button>
       </div>
 
       <!-- TEXT -->
@@ -198,10 +233,10 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
         <div>
           <label class="block text-sm text-gray-700 mb-2">Datei auswählen</label>
           <label class="flex items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-green-500 transition-colors bg-gray-50" :class="pdfForm.file?'border-green-500 bg-green-50':''">
-            <input type="file" @change="onFileChange" accept=".pdf,.txt,.md,.doc,.docx" class="hidden" />
+            <input type="file" @change="onFileChange" accept=".pdf,.txt,.md,.doc,.docx,.png,.jpg,.jpeg,.webp" class="hidden" />
             <div class="text-center">
               <span class="text-4xl mb-2 block">📄</span>
-              <p class="text-sm text-gray-600">{{ pdfForm.file ? pdfForm.file.name : 'PDF, TXT, MD, DOC auswählen' }}</p>
+              <p class="text-sm text-gray-600">{{ pdfForm.file ? pdfForm.file.name : 'PDF, TXT, MD, DOC oder Screenshot (PNG/JPG) auswählen' }}</p>
               <p v-if="pdfForm.file" class="text-xs text-gray-500 mt-1">{{ (pdfForm.file.size / 1024).toFixed(1) }} KB</p>
             </div>
           </label>
@@ -258,6 +293,58 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
         </div>
 
         <button @click="submitUrl" :disabled="loading || urlForm.url.length < 4" class="neu-btn-primary px-4 py-2 text-sm disabled:opacity-50">{{ loading ? '🌐 Scraping läuft…' : '🌐 URL laden & analysieren' }}</button>
+      </div>
+
+      <!-- RSS-FEED -->
+      <div v-if="mode==='rss'" class="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
+        <div class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <span class="text-lg shrink-0">📶</span>
+          <div>
+            <p class="text-sm font-medium text-blue-800">RSS-Feed als dauerhafte Quelle</p>
+            <p class="text-xs text-blue-600 mt-0.5">Neue Artikel im Feed landen automatisch im Eingang (Quellen-Seite → Tab 📥 Eingang) — mit KI-extrahierten Angle-Vorschlägen zur Freigabe.</p>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-900 mb-1 font-medium">Feed-URL *</label>
+          <input v-model="rssForm.url" type="url" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500" placeholder="https://blog.hubspot.com/marketing/rss.xml" @keydown.enter="submitRss" />
+          <p class="text-xs text-gray-500 mt-1">Typische Endungen: <span class="font-mono">/rss.xml</span>, <span class="font-mono">/feed</span>, <span class="font-mono">/atom.xml</span></p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Titel (optional)</label>
+            <input v-model="rssForm.title" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Wird aus dem Feed gelesen" />
+          </div>
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Strategie</label>
+            <select v-model="rssForm.strategy" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"><option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option></select>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Prüf-Frequenz</label>
+            <select v-model="rssForm.frequency" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900">
+              <option value="daily">Täglich (empfohlen)</option>
+              <option value="weekly">Wöchentlich</option>
+              <option value="biweekly">Alle 2 Wochen</option>
+            </select>
+          </div>
+        </div>
+        <button @click="submitRss" :disabled="loading || rssForm.url.length < 8" class="neu-btn-primary px-4 py-2 text-sm disabled:opacity-50">{{ loading ? '📶 Feed wird gelesen…' : '📶 Feed anlegen & sofort erste Artikel ziehen' }}</button>
+
+        <!-- Ergebnis -->
+        <div v-if="rssResult?.error" class="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p class="text-sm text-red-700">⚠️ {{ rssResult.error }}</p>
+        </div>
+        <div v-if="rssResult?.source" class="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-green-800">✅ Feed „{{ rssResult.source.title }}" angelegt</p>
+          <p v-if="rssResult.first_fetch" class="text-xs text-green-700">
+            Erster Durchlauf: <strong>{{ rssResult.first_fetch.items_new ?? 0 }}</strong> neue Artikel in der Warteschlange
+            <span v-if="rssResult.first_fetch.items_total"> (von {{ rssResult.first_fetch.items_total }} im Feed)</span>
+            <span v-if="rssResult.first_fetch.error" class="text-red-600"> — ⚠️ {{ rssResult.first_fetch.error }}</span>
+          </p>
+          <p class="text-xs text-green-600">
+            👉 Weiter zu <a href="/quellen" class="underline font-medium">Quellen → Eingang</a>,
+            um Angle-Entwürfe zu extrahieren und freizugeben.
+          </p>
+        </div>
       </div>
 
       <!-- Result: Draft-Angles zur Freigabe -->

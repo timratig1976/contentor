@@ -30,9 +30,10 @@ class SourceMonitorService
     public function run(?string $strategyKey = null, bool $force = false): array
     {
         $query = Source::where('monitor', true)
-            ->where('type', 'url')
-            ->whereNotNull('url')
-            ->with('strategy');
+            ->whereIn('type', ['url', 'rss', 'video', 'audio', 'screenshot', 'community'])
+            ->with('strategy')
+            // URL-Pflicht nur für Typen, die eine URL brauchen (screenshot nutzt file_ref)
+            ->where(fn ($q) => $q->where('type', 'screenshot')->orWhereNotNull('url'));
 
         if ($strategyKey) {
             $query->whereHas('strategy', fn ($q) => $q->where('key', $strategyKey));
@@ -63,8 +64,21 @@ class SourceMonitorService
      * Einzelne Quelle crawlen + Change-Detection + ggf. Angles extrahieren.
      * Erst-Crawl (kein Hash) gilt ebenfalls als "changed", damit sofort Angles entstehen.
      */
+    /**
+     * Einzelne Quelle prüfen: typ-basiertes Dispatch.
+     *
+     * - rss/community/screenshot → SourceIntelligenceService (Queue-basiert)
+     * - url → bestehender Scrape + Hash-Pfad (direkte Angle-Extraktion)
+     *
+     * Erst-Crawl (kein Hash) gilt ebenfalls als "changed", damit sofort Angles entstehen.
+     */
     public function checkSource(Source $source): array
     {
+        // Neue Quelltypen laufen über Intelligence-Service + Approval-Queue
+        if (in_array($source->type, ['rss', 'community', 'screenshot', 'video', 'audio'], true)) {
+            return app(SourceIntelligenceService::class)->check($source);
+        }
+
         if (empty($source->url)) {
             return ['source' => $source->id, 'url' => null, 'status' => 'error', 'error' => 'Keine URL hinterlegt.'];
         }

@@ -81,6 +81,12 @@ Route::patch('/media/{media}', [MediaController::class, 'update']);
 Route::delete('/media/{media}', [MediaController::class, 'destroy']);
 Route::get('/media', [MediaController::class, 'index']);
 
+// Source Input Queue (Approval für automatische Quellen: RSS, OCR, Community)
+Route::get('/source-queue', [\App\Http\Controllers\Api\SourceQueueController::class, 'index']);
+Route::post('/source-queue/process', [\App\Http\Controllers\Api\SourceQueueController::class, 'process']);
+Route::post('/source-queue/{queueItem}/approve', [\App\Http\Controllers\Api\SourceQueueController::class, 'approve']);
+Route::post('/source-queue/{queueItem}/reject', [\App\Http\Controllers\Api\SourceQueueController::class, 'reject']);
+
 // Newsletter
 Route::post('/newsletter/bk', [NewsletterController::class, 'bkDraft']);
 Route::post('/newsletter/bk-newsletter', [NewsletterController::class, 'bkNewsletter']);

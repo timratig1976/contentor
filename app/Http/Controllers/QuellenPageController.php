@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Source;
+use App\Models\SourceInputQueue;
 use App\Models\Strategy;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -24,10 +25,24 @@ class QuellenPageController extends Controller
         $sources = $query->latest()->paginate(25)->withQueryString();
         $strategies = Strategy::all();
 
+        // Eingangs-Queue (Draft-Angles aus automatischen Quellen) für Approval-UI
+        $queueItems = SourceInputQueue::with(['source:id,title,type', 'strategy:id,key,name'])
+            ->whereIn('status', ['done', 'processing'])
+            ->whereNotNull('extracted_angles')
+            ->latest()
+            ->limit(50)
+            ->get();
+        $queueCounts = [
+            'pending' => SourceInputQueue::where('status', 'pending')->count(),
+            'done' => SourceInputQueue::where('status', 'done')->whereNotNull('extracted_angles')->count(),
+        ];
+
         return Inertia::render('Quellen/Index', [
             'sources' => $sources,
             'strategies' => $strategies,
             'filters' => $request->only(['strategy', 'type']),
+            'queueItems' => $queueItems,
+            'queueCounts' => $queueCounts,
         ]);
     }
 }

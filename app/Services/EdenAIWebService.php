@@ -198,6 +198,102 @@ class EdenAIWebService
             ->post($url, $payload);
     }
 
+    /**
+     * OCR (Texterkennung) eines Bildes über EdenAI v2 OCR/OCR.
+     *
+     * @return array{success: bool, text: ?string, confidence: ?float, cost: ?float, error: ?string}
+     */
+    public function ocr(string $imagePath): array
+    {
+        $start = microtime(true);
+
+        if (! file_exists($imagePath)) {
+            return ['success' => false, 'text' => null, 'confidence' => null, 'cost' => null, 'error' => 'Datei nicht gefunden: ' . $imagePath];
+        }
+
+        $payload = [
+            'providers' => 'google',
+            'fallback_providers' => 'amazon',
+            'file' => base64_encode(file_get_contents($imagePath)),
+            'show_original_response' => false,
+        ];
+
+        try {
+            $response = Http::timeout(self::API_TIMEOUT)
+                ->withHeaders([
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->post('https://api.edenai.run/v2/ocr/ocr/', $payload);
+
+            $duration = (int) round((microtime(true) - $start) * 1000);
+            $data = $response->json() ?? [];
+
+            if ($response->failed()) {
+                $error = 'EdenAI HTTP ' . $response->status() . ': ' . mb_substr($response->body(), 0, 300);
+                $this->logOcrEvent('error', $duration, null, $error);
+
+                return ['success' => false, 'text' => null, 'confidence' => null, 'cost' => null, 'error' => $error];
+            }
+
+            $text = '';
+            $confidence = null;
+            foreach (['google', 'amazon'] as $provider) {
+                $p = $data[$provider] ?? null;
+                if (! is_array($p)) {
+                    continue;
+                }
+                if (! empty($p['text'])) {
+                    $text = (string) $p['text'];
+                } elseif (! empty($p['parsed_inference'])) {
+                    $lines = [];
+                    foreach ($p['parsed_inference'] as $page) {
+                        foreach (($page['lines'] ?? []) as $line) {
+                            $lines[] = $line['text'] ?? '';
+                        }
+                    }
+                    $text = implode("\n", $lines);
+                }
+                if ($text !== '') {
+                    break;
+                }
+            }
+
+            $cost = $data['cost'] ?? null;
+            $this->logOcrEvent('success', $duration, $cost, $text === '' ? 'Kein Text erkannt' : null);
+
+            return [
+                'success' => true,
+                'text' => $text !== '' ? $text : null,
+                'confidence' => $confidence,
+                'cost' => $cost,
+                'error' => null,
+            ];
+        } catch (\Throwable $e) {
+            $duration = (int) round((microtime(true) - $start) * 1000);
+            $this->logOcrEvent('error', $duration, null, $e->getMessage());
+
+            return ['success' => false, 'text' => null, 'confidence' => null, 'cost' => null, 'error' => $e->getMessage()];
+        }
+    }
+
+    private function logOcrEvent(string $status, int $durationMs, ?float $credits, ?string $error): void
+    {
+        try {
+            MonitoringEvent::create([
+                'type' => 'ocr',
+                'status' => $status,
+                'provider' => 'edenai/ocr',
+                'model' => 'ocr/ocr (google)',
+                'credits' => $credits,
+                'duration_ms' => $durationMs,
+                'error' => $error ? mb_substr($error, 0, 480) : null,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('MonitoringEvent (ocr) log failed: ' . $e->getMessage());
+        }
+    }
+
     private function parseResponse(Response $response, string $type, array $payload, int $durationMs, array $meta): array
     {
         if ($response->failed()) {

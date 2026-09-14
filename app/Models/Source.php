@@ -15,12 +15,13 @@ class Source extends Model
         'id', 'strategy_id', 'title', 'type', 'visibility',
         'file_ref', 'batch_key', 'url', 'monitor', 'frequency',
         'last_checked_at', 'content_hash', 'last_content_preview',
-        'raw_content',
+        'raw_content', 'meta',
     ];
 
     protected $casts = [
         'monitor' => 'boolean',
         'last_checked_at' => 'datetime',
+        'meta' => 'array',
     ];
 
     public function strategy(): BelongsTo
