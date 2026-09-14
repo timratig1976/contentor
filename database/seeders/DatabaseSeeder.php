@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             ContentTransferSeeder::class,
             TimRatigPersonaSeeder::class,
             AgentPromptsSeeder::class,
+            PostTemplateSeeder::class,
         ]);
     }
 }

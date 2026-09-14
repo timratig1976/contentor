@@ -4,40 +4,11 @@ import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 const props = defineProps({
-    strategies: Array,
-    currentStrategy: Object,
     templates: Array,
-    selected: Array,  // IDs der für diese Strategie aktiven Templates
     formats: Object,  // { linkedin_post: 'LinkedIn Post', ... }
 });
 
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
-
-// ─── Strategie wechseln ───
-function switchStrategy(key) {
-    router.get('/templates', { strategy: key }, { preserveState: false });
-}
-
-// ─── Auswahl pro Strategie ───
-const selectedIds = reactive(new Set(props.selected || []));
-const selectionSaving = ref(false);
-const selectionSaved = ref(false);
-
-function toggleSelected(id) {
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-}
-function isSelected(id) { return selectedIds.has(id); }
-async function saveSelection() {
-    selectionSaving.value = true; selectionSaved.value = false;
-    await fetch('/api/post-templates/selection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
-        body: JSON.stringify({ strategy: props.currentStrategy.key, selected: [...selectedIds] }),
-    });
-    selectionSaving.value = false; selectionSaved.value = true;
-    setTimeout(() => selectionSaved.value = false, 2000);
-}
 
 // ─── Gruppenansicht nach Format ───
 const activeFormat = ref('');
@@ -70,13 +41,13 @@ function closeDetail() { detailTemplate.value = null; exampleResult.value = ''; 
 const exampleResult = ref('');
 const generatingExample = ref(false);
 async function generateExample(tpl) {
-    if (!props.currentStrategy || generatingExample.value) return;
+    if (generatingExample.value) return;
     generatingExample.value = true;
     const res = await fetch('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
         body: JSON.stringify({
-            message: `Generiere ein konkretes Beispiel für das Template "${tpl.name}" (Format: ${tpl.format}) für die Strategie "${props.currentStrategy.name}". Template-Struktur: ${tpl.structure}. Gib NUR den fertigen Content-Text aus, keine Erklärungen.`,
+            message: `Generiere ein konkretes Beispiel für das Template "${tpl.name}" (Format: ${tpl.format}). Template-Struktur: ${tpl.structure}. Gib NUR den fertigen Content-Text aus, keine Erklärungen.`,
             history: [],
         }),
     });
@@ -165,12 +136,9 @@ function formatLabel(f) { return props.formats?.[f] || f; }
 
       <!-- Header -->
       <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-4">
+        <div>
           <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">📝 Template-Katalog</h1>
-          <select v-if="strategies?.length" :value="currentStrategy?.key" @change="switchStrategy($event.target.value)"
-            class="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900">
-            <option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option>
-          </select>
+          <p class="text-sm text-gray-500 mt-0.5">Zentrale Sammlung guter Templates — gilt für alle Strategien.</p>
         </div>
         <div class="flex items-center gap-2">
           <button @click="showIdentify = !showIdentify" class="px-4 py-2 text-sm bg-violet-50 border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-100 transition-colors">
@@ -179,20 +147,6 @@ function formatLabel(f) { return props.formats?.[f] || f; }
           <button @click="showAddForm = !showAddForm" class="px-4 py-2 text-sm neu-btn-primary">
             + Template hinzufügen
           </button>
-        </div>
-      </div>
-
-      <!-- Aktuelle Auswahl (Strategie) -->
-      <div class="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-5 flex items-center justify-between">
-        <div>
-          <p class="text-sm text-amber-800 font-medium">Auswahl für <strong>{{ currentStrategy?.name }}</strong></p>
-          <p class="text-xs text-amber-600 mt-0.5">{{ selectedIds.size }} von {{ templates?.length }} Templates aktiviert — klicke auf ✓/○ um die Auswahl zu ändern, dann „Auswahl speichern".</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button @click="saveSelection" :disabled="selectionSaving" class="px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
-            {{ selectionSaving ? 'Speichere…' : '💾 Auswahl speichern' }}
-          </button>
-          <span v-if="selectionSaved" class="text-xs text-green-600 font-medium">✓ Gespeichert</span>
         </div>
       </div>
 
@@ -304,7 +258,6 @@ function formatLabel(f) { return props.formats?.[f] || f; }
             <div class="flex items-center gap-3">
               <span class="text-sm font-semibold text-gray-900">{{ formatLabel(format) }}</span>
               <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{{ tpls.length }} Templates</span>
-              <span class="text-xs text-green-600 font-medium">{{ tpls.filter(t => isSelected(t.id)).length }} aktiv</span>
             </div>
             <span class="text-gray-400 transition-transform" :class="{ 'rotate-180': isGroupExpanded(format) }">▾</span>
           </button>
@@ -313,14 +266,6 @@ function formatLabel(f) { return props.formats?.[f] || f; }
           <div v-if="isGroupExpanded(format)" class="divide-y divide-gray-50">
             <div v-for="tpl in tpls" :key="tpl.id"
               class="flex items-start gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors">
-
-              <!-- Auswahl-Toggle -->
-              <button @click="toggleSelected(tpl.id)"
-                class="mt-0.5 w-6 h-6 rounded-full border-2 shrink-0 flex items-center justify-center transition-all"
-                :class="isSelected(tpl.id) ? 'border-green-500 bg-green-500 text-white' : 'border-gray-300 text-transparent hover:border-green-400'"
-                :title="isSelected(tpl.id) ? 'Deaktivieren' : 'Aktivieren'">
-                ✓
-              </button>
 
               <!-- Inhalt -->
               <div class="flex-1 min-w-0">
@@ -360,15 +305,6 @@ function formatLabel(f) { return props.formats?.[f] || f; }
           </div>
 
           <div class="p-5 flex-1 space-y-5">
-            <!-- Auswahl-Toggle groß -->
-            <button @click="toggleSelected(detailTemplate.id)"
-              class="w-full py-2.5 rounded-xl text-sm font-semibold border-2 transition-all"
-              :class="isSelected(detailTemplate.id)
-                ? 'border-green-500 bg-green-50 text-green-700'
-                : 'border-gray-300 bg-white text-gray-600 hover:border-green-400'">
-              {{ isSelected(detailTemplate.id) ? '✓ Für ' + currentStrategy?.name + ' aktiv' : '○ Für ' + currentStrategy?.name + ' aktivieren' }}
-            </button>
-
             <!-- Struktur -->
             <div>
               <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Struktur (Bausteine)</label>

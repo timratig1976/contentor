@@ -29,9 +29,23 @@ class QuickInputController extends Controller
      */
     public function store(Request $request)
     {
-        // Handle PDF upload
-        if ($request->hasFile('file')) {
+        // Handle PDF/Datei-Upload. Auch absichtlich, wenn ein 'file'-Feld
+        // gesendet wurde, aber KEIN valider Upload ist (z. B. leer) — sonst
+        // würde die Text-Validation unten fälschlich "content required" melden.
+        if ($request->hasFile('file') || $request->request->has('file')) {
             return $this->storeFromFile($request);
+        }
+
+        // Datei-Upload ging schief (z. B. größer als upload_max_filesize/post_max_size):
+        // PHP verwirft die Datei dann STILL — weder hasFile() noch ein 'file'-Feld ist
+        // vorhanden, aber es ist ein Multipart-Request. Klar melden statt "content required".
+        if (str_starts_with((string) $request->header('Content-Type'), 'multipart/form-data')) {
+            $limit = ini_get('upload_max_filesize');
+
+            return response()->json([
+                'error' => "Datei-Upload fehlgeschlagen — vermutlich zu groß (Server-Limit: {$limit}). "
+                    . 'Bitte kleinere Datei verwenden oder das PHP-Limit erhöhen.',
+            ], 422);
         }
 
         $validated = $request->validate([
@@ -131,10 +145,24 @@ class QuickInputController extends Controller
         $extension = strtolower($file->getClientOriginalExtension());
 
         // Extract text from file
+        $ocrUsed = false;
         if ($extension === 'pdf') {
             $parser = new Parser();
             $pdf = $parser->parseFile($file->getPathname());
-            $content = $pdf->getText();
+            $content = trim((string) $pdf->getText());
+
+            // Scanned-/Bild-PDF? Dann OCR-Fallback: Seiten → PNG → EdenAI OCR.
+            if (mb_strlen($content) < 40) {
+                [$ocrText, $ocrErr] = $this->ocrPdf($file->getPathname());
+                if ($ocrText !== null && mb_strlen($ocrText) >= 20) {
+                    $content = $ocrText;
+                    $ocrUsed = true;
+                } elseif (mb_strlen($content) < 20) {
+                    return response()->json([
+                        'error' => 'Kein Text im PDF gefunden und OCR fehlgeschlagen: ' . ($ocrErr ?? 'unbekannt'),
+                    ], 422);
+                }
+            }
         } elseif (in_array($extension, ['png', 'jpg', 'jpeg', 'webp'], true)) {
             return $this->storeFromImage($request, $validated, $strategy, $file);
         } else {
@@ -147,6 +175,9 @@ class QuickInputController extends Controller
         }
 
         $title = $validated['title'] ?? $file->getClientOriginalName();
+        if ($ocrUsed && empty($validated['title'])) {
+            $title .= ' (OCR)';
+        }
 
         $source = Source::create([
             'title' => $title,
@@ -159,6 +190,9 @@ class QuickInputController extends Controller
         ]);
 
         $result = ['source' => $source->load('strategy'), 'drafts' => []];
+        if ($ocrUsed) {
+            $result['ocr'] = true;
+        }
 
         if ($validated['create_angles'] ?? true) {
             $result['drafts'] = $this->extractDraftAngles($content, $strategy, (int) ($validated['num_angles'] ?? 5));
@@ -218,6 +252,64 @@ class QuickInputController extends Controller
         }
 
         return response()->json($result, 201);
+    }
+
+    /**
+     * OCR-Fallback für gescannte PDFs: jede Seite via pdftoppm in ein PNG
+     * rastern und den Text per EdenAI OCR erkennen.
+     *
+     * @return array{0: ?string, 1: ?string} [extrahierter Text|null, Fehlermeldung|null]
+     */
+    private function ocrPdf(string $pdfPath): array
+    {
+        if (! $this->webService->configured()) {
+            return [null, 'EdenAI-Key fehlt (Einstellungen).'];
+        }
+
+        $pdftoppm = trim((string) @shell_exec('command -v pdftoppm'));
+        if ($pdftoppm === '') {
+            return [null, 'pdftoppm nicht installiert (brew install poppler).'];
+        }
+
+        $tmpDir = storage_path('app/tmp/ocr_' . uniqid());
+        if (! @mkdir($tmpDir, 0755, true) && ! is_dir($tmpDir)) {
+            return [null, 'Temp-Verzeichnis nicht erstellbar.'];
+        }
+
+        try {
+            // Max. 10 Seiten, 150 DPI reicht für OCR
+            $prefix = $tmpDir . '/page';
+            @shell_exec(sprintf(
+                '%s -png -r 150 -f 1 -l 10 %s %s 2>&1',
+                escapeshellarg($pdftoppm),
+                escapeshellarg($pdfPath),
+                escapeshellarg($prefix)
+            ));
+
+            $images = glob($tmpDir . '/page-*.png') ?: [];
+            sort($images);
+            if (! $images) {
+                return [null, 'PDF konnte nicht gerastert werden.'];
+            }
+
+            $texts = [];
+            foreach ($images as $img) {
+                $ocr = $this->webService->ocr($img);
+                if ($ocr['success'] && ! empty($ocr['text'])) {
+                    $texts[] = trim((string) $ocr['text']);
+                }
+            }
+
+            $content = trim(implode("\n\n", $texts));
+
+            return $content !== '' ? [$content, null] : [null, 'OCR ergab keinen Text.'];
+        } finally {
+            // Temp-Dateien aufräumen
+            foreach (glob($tmpDir . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($tmpDir);
+        }
     }
 
     private function detectType(string $content): string

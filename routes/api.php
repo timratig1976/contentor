@@ -68,7 +68,6 @@ Route::get('/post-templates', [\App\Http\Controllers\Api\PostTemplateController:
 Route::post('/post-templates', [\App\Http\Controllers\Api\PostTemplateController::class, 'store']);
 Route::patch('/post-templates/{postTemplate}', [\App\Http\Controllers\Api\PostTemplateController::class, 'update']);
 Route::delete('/post-templates/{postTemplate}', [\App\Http\Controllers\Api\PostTemplateController::class, 'destroy']);
-Route::post('/post-templates/selection', [\App\Http\Controllers\Api\PostTemplateController::class, 'updateSelection']);
 Route::post('/post-templates/identify', [\App\Http\Controllers\Api\PostTemplateController::class, 'identify']);
 
 // Medien

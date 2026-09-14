@@ -211,20 +211,19 @@ class EdenAIWebService
             return ['success' => false, 'text' => null, 'confidence' => null, 'cost' => null, 'error' => 'Datei nicht gefunden: ' . $imagePath];
         }
 
-        $payload = [
-            'providers' => 'google',
-            'fallback_providers' => 'amazon',
-            'file' => base64_encode(file_get_contents($imagePath)),
-            'show_original_response' => false,
-        ];
+        $mime = mime_content_type($imagePath) ?: 'image/png';
 
         try {
+            // EdenAI OCR erwartet multipart/form-data mit echter Datei —
+            // JSON + base64 wird mit "not a file" abgelehnt.
             $response = Http::timeout(self::API_TIMEOUT)
-                ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->apiKey,
-                    'Content-Type' => 'application/json',
-                ])
-                ->post('https://api.edenai.run/v2/ocr/ocr/', $payload);
+                ->withHeaders(['Authorization' => 'Bearer ' . $this->apiKey])
+                ->attach('file', file_get_contents($imagePath), basename($imagePath), ['Content-Type' => $mime])
+                ->post('https://api.edenai.run/v2/ocr/ocr/', [
+                    'providers' => 'google',
+                    'fallback_providers' => 'amazon',
+                    'show_original_response' => 'false',
+                ]);
 
             $duration = (int) round((microtime(true) - $start) * 1000);
             $data = $response->json() ?? [];

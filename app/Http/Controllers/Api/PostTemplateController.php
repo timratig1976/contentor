@@ -3,46 +3,30 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ContentStrategy;
 use App\Models\PostTemplate;
-use App\Models\Strategy;
 use App\Services\LlmService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Zentraler Template-Katalog: CRUD + KI-Identifikation aus Beispieltext.
+ * Zentraler, globaler Template-Katalog: CRUD + KI-Identifikation.
  *
- * Ersetzt die vorherige Dopplung (identische Template-Listen hardcodiert
- * in Strategie/Index.vue UND Templates/Index.vue). Ab jetzt: 1 Katalog
- * (post_templates-Tabelle), Strategien wählen nur noch per ID-Liste aus,
- * welche Templates für sie aktiv sind.
+ * Bewusst KEINE Strategie-Bindung: gute Templates werden zentral
+ * gesammelt und stehen allen Strategien zur Verfügung.
  */
 class PostTemplateController extends Controller
 {
     public function __construct(private LlmService $llm) {}
 
     /**
-     * Katalog + je Strategie die aktuelle Auswahl (falls strategy übergeben).
+     * Der komplette aktive Katalog.
      */
     public function index(Request $request): JsonResponse
     {
-        $templates = PostTemplate::orderBy('format')->orderBy('name')->get();
+        $templates = PostTemplate::where('active', true)
+            ->orderBy('format')->orderBy('name')->get();
 
-        $selected = null;
-        if ($request->filled('strategy')) {
-            $strategy = Strategy::where('key', $request->input('strategy'))->first();
-            if ($strategy) {
-                $cs = ContentStrategy::where('strategy_id', $strategy->id)
-                    ->where('key', 'post_templates')->first();
-                $selected = $cs?->content['selected'] ?? [];
-            }
-        }
-
-        return response()->json([
-            'templates' => $templates,
-            'selected' => $selected,
-        ]);
+        return response()->json(['templates' => $templates]);
     }
 
     public function store(Request $request): JsonResponse
@@ -83,30 +67,6 @@ class PostTemplateController extends Controller
         $postTemplate->delete();
 
         return response()->json(['deleted' => $postTemplate->id]);
-    }
-
-    /**
-     * Setzt die Template-Auswahl einer Strategie (welche Templates sind aktiv).
-     */
-    public function updateSelection(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'strategy' => 'required|string|exists:strategies,key',
-            'selected' => 'required|array',
-            'selected.*' => 'integer|exists:post_templates,id',
-        ]);
-
-        $strategy = Strategy::where('key', $validated['strategy'])->firstOrFail();
-
-        $cs = ContentStrategy::updateOrCreate(
-            ['strategy_id' => $strategy->id, 'key' => 'post_templates'],
-            []
-        );
-        $cs->content = ['selected' => $validated['selected']];
-        $cs->version = ($cs->version ?? 0) + 1;
-        $cs->save();
-
-        return response()->json(['selected' => $validated['selected']]);
     }
 
     /**

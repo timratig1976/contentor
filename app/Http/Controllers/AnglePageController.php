@@ -96,22 +96,14 @@ class AnglePageController extends Controller
             }
         }
 
-        // Für diese Strategie ausgewählte Templates aus dem globalen Katalog
-        // (single source of truth: post_templates-Tabelle statt Duplikat in ContentStrategy)
+        // Globaler Template-Katalog — alle aktiven Templates stehen
+        // jeder Strategie zur Verfügung (keine Strategie-Auswahl mehr).
         $templates = [];
         // Der Strategie zugeordnete Personas (für Stil-Auswahl beim Produzieren)
         $personas = [];
         if ($angle->strategy) {
-            $contentStrategy = \App\Models\ContentStrategy::where('strategy_id', $angle->strategy->id)
-                ->where('key', 'post_templates')
-                ->first();
-            $selectedIds = $contentStrategy?->content['selected'] ?? null;
-
-            $query = \App\Models\PostTemplate::where('active', true);
-            if (is_array($selectedIds)) {
-                $query->whereIn('id', $selectedIds);
-            }
-            $templates = $query->orderBy('format')->orderBy('name')->get();
+            $templates = \App\Models\PostTemplate::where('active', true)
+                ->orderBy('format')->orderBy('name')->get();
 
             $personas = $angle->strategy->personas()
                 ->where('active', true)

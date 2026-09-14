@@ -278,6 +278,7 @@ class ContentController extends Controller
     private function produceSingleContent(Angle $angle, array $params, Strategy $strategy, array $strategyCtx, ?array $personaCtx, ?string $groupId, ?string $pattern): ContentItem
     {
         $content = $this->generateContentWithLLM($angle, $params, $strategy, $strategyCtx, $personaCtx);
+        $content = $this->stripMarkdown($content);
         $content = $this->rulesService->enforceTone($content, $params['format'], $strategy, $strategyCtx);
 
         $item = ContentItem::create([
@@ -547,10 +548,7 @@ class ContentController extends Controller
 
     /**
      * Findet das passende Post-Template zum Varianten-Pattern.
-     * Quelle ist der globale PostTemplate-Katalog, gefiltert auf die für
-     * diese Strategie ausgewählten IDs (ContentStrategy.key='post_templates'
-     * → content['selected']). Fallback auf das Legacy-Array-Schema, falls
-     * eine Strategie noch keine Katalog-Auswahl hat.
+     * Quelle ist der globale PostTemplate-Katalog (alle aktiven Templates).
      */
     private function findTemplate(Strategy $strategy, array $postTemplatesCtx, string $pattern): ?array
     {
@@ -565,37 +563,17 @@ class ContentController extends Controller
             default       => [$pattern],
         };
 
-        $selectedIds = $postTemplatesCtx['selected'] ?? null;
-        if (is_array($selectedIds)) {
-            $catalog = \App\Models\PostTemplate::whereIn('id', $selectedIds)->where('active', true)->get();
-            foreach ($catalog as $tpl) {
-                $name = strtolower($tpl->name);
-                foreach ($needles as $needle) {
-                    if (str_contains($name, $needle)) {
-                        return $tpl->toArray();
-                    }
+        $catalog = \App\Models\PostTemplate::where('active', true)->get();
+        foreach ($catalog as $tpl) {
+            $name = strtolower($tpl->name);
+            foreach ($needles as $needle) {
+                if (str_contains($name, $needle)) {
+                    return $tpl->toArray();
                 }
             }
-
-            return null;
         }
 
-        // Legacy-Fallback: altes Array-Schema direkt in ContentStrategy
-        $list = $postTemplatesCtx['templates'] ?? null;
-        if (is_array($list)) {
-            foreach ($list as $tpl) {
-                $name = strtolower((string) ($tpl['name'] ?? ''));
-                foreach ($needles as $needle) {
-                    if (str_contains($name, $needle)) {
-                        return $tpl;
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        return $postTemplatesCtx[$pattern] ?? null;
+        return null;
     }
 
     /**
@@ -633,12 +611,11 @@ class ContentController extends Controller
 
             $lines[] = "PATTERN: {$tplName}" . ($tplDesc ? " — {$tplDesc}" : '');
             if ($tplStructure) {
-                $structure = is_array($tplStructure) ? implode(' → ', $tplStructure) : str_replace("\n", ' → ', $tplStructure);
-                $lines[] = "Struktur (zwingend einhalten, jeder Punkt = eigener Absatz): " . $structure;
-                // Kontext-Absatz erzwingen, falls die Template-Struktur direkt mit der Liste startet
-                if (!str_contains(mb_strtolower($structure), 'kontext')) {
-                    $lines[] = "Struktur-Hinweis: Hook → Kontext/Problem (eigener Absatz, 2-3 Sätze, BEVOR der erste Listenpunkt beginnt) → " . $structure;
-                }
+                $structure = is_array($tplStructure) ? implode('\n', $tplStructure) : $tplStructure;
+                $lines[] = "Struktur (die inhaltliche Dramaturgie — führe die Gedanken in dieser Reihenfolge als zusammenhängenden, fließenden Text):\n" . $structure;
+                $lines[] = "WICHTIG: Die obigen Struktur-Begriffe sind nur interne Gedankenstützen für dich. "
+                    . "Schreibe sie NICHT als Überschriften, Zwischentitel oder Labels in den Text. "
+                    . "Der Leser soll eine durchgehende, natürliche Erzählung lesen — keine Gliederung mit Stichwort-Headern.";
             }
             if ($tplExample) {
                 $lines[] = "Beispiel (nur als Stil-Referenz, NICHT kopieren): \"{$tplExample}\"";
@@ -824,14 +801,46 @@ class ContentController extends Controller
         }
 
         $lines[] = "";
-        $lines[] = "Formatierung: KEIN Markdown (keine **, keine #-Überschriften). Nur Zeilenumbrüche.";
+        $lines[] = "Formatierung: Plain-Text. AUSDRÜCKLICH VERBOTEN: Markdown jeglicher Art — keine **fetten** oder *kursiven* Markierungen, keine #-Überschriften, keine Aufzählungs-Symbole am Zeilenanfang (-, *, •), keine nummerierten Listen mit Label-Präfix. "
+            . "Nutze AUSSCHLIESSLICH normale Sätze und Leerzeilen zur Gliederung.";
         $lines[] = $this->paragraphFormattingRule($format);
         $lines[] = "";
         $lines[] = $this->humanWritingConstraints();
         $lines[] = "";
-        $lines[] = "Gib NUR den Content-Text aus.";
+        $lines[] = "Gib NUR den Content-Text aus — keine Überschriften, keine Labels, kein Markdown.";
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Entfernt Markdown-Reste aus dem generierten Text (Sicherheitsnetz,
+     * falls das Modell trotz Prompt-Verbot **, #, Listenmarker o.ä. ausgibt).
+     * Zeilenstruktur (Absätze) bleibt erhalten — nur die Markup-Zeichen
+     * werden entfernt, damit der Output sauberer Plain-Text ist.
+     */
+    private function stripMarkdown(string $text): string
+    {
+        // Fett/Kursiv: **text**, __text__, *text*, _text_
+        $text = preg_replace('/\*\*(.+?)\*\*/s', '$1', $text);
+        $text = preg_replace('/__(.+?)__/s', '$1', $text);
+        $text = preg_replace('/(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)/s', '$1', $text);
+        $text = preg_replace('/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/s', '$1', $text);
+
+        // Zeilenweise: Überschriften-Marker (#), Listen-Marker (-, *, •, 1.) und
+        // verbleibende Label-Präfixe "**Foo:**" → "Foo:" entfernen
+        $lines = preg_split('/\R/', $text);
+        $out = [];
+        foreach ($lines as $line) {
+            $l = $line;
+            // Markdown-Überschrift "# Titel" → "Titel"
+            $l = preg_replace('/^\s{0,3}#{1,6}\s+/', '', $l);
+            // Listen-Marker am Zeilenanfang entfernen
+            $l = preg_replace('/^\s*[-*•]\s+/', '', $l);
+            $l = preg_replace('/^\s*\d+\.\s+/', '', $l);
+            $out[] = rtrim($l);
+        }
+
+        return trim(implode("\n", $out));
     }
 
     /**
@@ -881,14 +890,15 @@ class ContentController extends Controller
     private function randomHumanTic(): string
     {
         $tics = [
-            'Lass einen Gedanken bewusst unfertig oder hänge einen Nebengedanken mit "—" an, wie beim Sprechen.',
-            'Baue einen leicht unrunden Satz ein (zu lang oder mit Gedankensprung) statt durchgängig glatter Syntax.',
-            'Verzichte auf eine klare Drei-Akt-Struktur — steig mitten in einen Gedanken ein, ohne ihn erst anzukündigen.',
-            'Nutze eine leicht umgangssprachliche Wendung oder einen Halbsatz, der nicht perfekt grammatisch ist.',
-            'Wiederhole ein Wort bewusst statt ein elegantes Synonym zu suchen — wie ein Mensch es beim Schreiben tun würde.',
+            'Schreibe natürlich und flüssig wie ein erfahrener Texter — mit lebendigem Satzrhythmus, aber immer sprachlich korrekt.',
+            'Variiere die Satzlänge bewusst (kurze und längere Sätze im Wechsel) für einen natürlichen Lesefluss.',
+            'Steig direkt in den Gedanken ein, ohne ihn erst groß anzukündigen.',
+            'Nutze eine leicht umgangssprachliche, aber saubere Wendung, wo sie passt.',
+            'Wiederhole ein Schlüsselwort bewusst statt ein künstliches Synonym zu suchen — so klingt es natürlich.',
         ];
 
-        return 'ZUSÄTZLICH: ' . $tics[array_rand($tics)];
+        return 'ZUSÄTZLICH: ' . $tics[array_rand($tics)]
+            . ' WICHTIG: Bleibe dabei immer grammatikalisch und inhaltlich korrekt — keine abgeschnittenen Wörter, keine unfertigen Sätze, keine erfundenen Aussagen.';
     }
 
     /**

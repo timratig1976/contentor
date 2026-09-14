@@ -34,10 +34,12 @@ const rssForm = reactive({
 const rssResult = ref(null);
 
 const pdfForm = reactive({
-    file: null, title: '',
+    files: [], title: '',
     strategy: props.strategies?.[0]?.key || 'viscale',
     batch_key: '',
 });
+const dragging = ref(false);
+const fileInput = ref(null);
 
 // ─── Draft-Management ───
 const drafts = ref([]);            // [{ angle, icp, pain_cluster, statement_type, selected }]
@@ -145,17 +147,48 @@ async function submitUrl() {
 }
 
 async function submitPdf() {
-    if (!pdfForm.file) { alert('Bitte Datei auswählen'); return; }
+    const files = pdfForm.files.filter(f => f instanceof File);
+    if (!files.length) { alert('Bitte zuerst eine oder mehrere Dateien auswählen.'); return; }
     loading.value = true; result.value = null; drafts.value = [];
+    const allDrafts = [];
+    const sources = [];
+    const errors = [];
     try {
-        const fd = new FormData();
-        fd.append('file', pdfForm.file); fd.append('title', pdfForm.title);
-        fd.append('strategy', pdfForm.strategy); fd.append('batch_key', pdfForm.batch_key);
-        fd.append('num_angles', '5');
-        const res = await fetch('/api/quick-input', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf() }, body: fd });
-        const data = await res.json();
-        result.value = data;
-        setDrafts(data.drafts);
+        for (const file of files) {
+            const fd = new FormData();
+            fd.append('file', file, file.name);
+            fd.append('title', files.length === 1 ? (pdfForm.title || '') : '');
+            fd.append('strategy', pdfForm.strategy);
+            fd.append('batch_key', pdfForm.batch_key || '');
+            fd.append('num_angles', '5');
+            try {
+                const res = await fetch('/api/quick-input', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf() }, body: fd });
+                const data = await res.json();
+                if (!res.ok) {
+                    const msg = data.error
+                        || (data.errors ? Object.values(data.errors).flat().join(' ') : null)
+                        || data.message
+                        || `Fehler ${res.status}`;
+                    errors.push(`${file.name}: ${msg}`);
+                    continue;
+                }
+                if (data.source) sources.push(data.source);
+                if (Array.isArray(data.drafts)) allDrafts.push(...data.drafts);
+            } catch (e) {
+                errors.push(`${file.name}: ${e.message}`);
+            }
+        }
+        if (!sources.length && errors.length) {
+            result.value = { error: errors.join(' · ') };
+            return;
+        }
+        result.value = {
+            source: sources[0] || null,
+            sources,
+            multi: sources.length > 1,
+            error: errors.length ? errors.join(' · ') : null,
+        };
+        setDrafts(allDrafts);
     } catch (e) { alert('Fehler: ' + e.message); }
     finally { loading.value = false; }
 }
@@ -187,7 +220,24 @@ async function submitRss() {
     loading.value = false;
 }
 
-function onFileChange(e) { pdfForm.file = e.target.files[0]; }
+function onFileChange(e) {
+    addFiles(e.target.files);
+    e.target.value = ''; // gleiche Datei erneut wählbar machen
+}
+function onDrop(e) {
+    dragging.value = false;
+    addFiles(e.dataTransfer?.files);
+}
+function addFiles(fileList) {
+    const incoming = Array.from(fileList || []);
+    for (const f of incoming) {
+        if (!pdfForm.files.some(x => x.name === f.name && x.size === f.size)) {
+            pdfForm.files.push(f);
+        }
+    }
+}
+function removeFile(idx) { pdfForm.files.splice(idx, 1); }
+function fmtSize(bytes) { return (bytes / 1024).toFixed(1) + ' KB'; }
 const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', note: '📌', quote: '💬', interview: '🎤' };
 </script>
 
@@ -231,18 +281,35 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
           <div><label class="block text-sm text-gray-900 mb-1 font-medium">Strategie</label><select v-model="pdfForm.strategy" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"><option v-for="s in strategies" :key="s.key" :value="s.key">{{ s.name }}</option></select></div>
         </div>
         <div>
-          <label class="block text-sm text-gray-700 mb-2">Datei auswählen</label>
-          <label class="flex items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-green-500 transition-colors bg-gray-50" :class="pdfForm.file?'border-green-500 bg-green-50':''">
-            <input type="file" @change="onFileChange" accept=".pdf,.txt,.md,.doc,.docx,.png,.jpg,.jpeg,.webp" class="hidden" />
-            <div class="text-center">
+          <label class="block text-sm text-gray-700 mb-2">Dateien auswählen <span class="text-gray-400 font-normal">(mehrere möglich)</span></label>
+          <label
+            @dragover.prevent="dragging = true"
+            @dragleave.prevent="dragging = false"
+            @drop.prevent="onDrop"
+            class="flex items-center justify-center w-full min-h-40 border-2 border-dashed rounded-xl cursor-pointer transition-colors py-6"
+            :class="[dragging ? 'border-green-500 bg-green-50' : (pdfForm.files.length ? 'border-green-400 bg-green-50/40' : 'border-gray-300 bg-gray-50 hover:border-green-500')]">
+            <input ref="fileInput" type="file" multiple @change="onFileChange" accept=".pdf,.txt,.md,.doc,.docx,.png,.jpg,.jpeg,.webp" class="hidden" />
+            <div class="text-center pointer-events-none">
               <span class="text-4xl mb-2 block">📄</span>
-              <p class="text-sm text-gray-600">{{ pdfForm.file ? pdfForm.file.name : 'PDF, TXT, MD, DOC oder Screenshot (PNG/JPG) auswählen' }}</p>
-              <p v-if="pdfForm.file" class="text-xs text-gray-500 mt-1">{{ (pdfForm.file.size / 1024).toFixed(1) }} KB</p>
+              <p class="text-sm text-gray-600">{{ dragging ? 'Loslassen zum Hinzufügen…' : 'Dateien hierher ziehen oder klicken' }}</p>
+              <p class="text-xs text-gray-400 mt-1">PDF, TXT, MD, DOC oder Screenshot (PNG/JPG) — auch mehrere auf einmal</p>
             </div>
           </label>
+
+          <!-- Ausgewählte Dateien -->
+          <ul v-if="pdfForm.files.length" class="mt-3 space-y-1.5">
+            <li v-for="(f, idx) in pdfForm.files" :key="idx" class="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-base">📎</span>
+                <span class="text-sm text-gray-900 truncate">{{ f.name }}</span>
+                <span class="text-xs text-gray-400 shrink-0">{{ fmtSize(f.size) }}</span>
+              </div>
+              <button @click.prevent="removeFile(idx)" class="text-gray-400 hover:text-red-500 text-sm shrink-0 ml-2" title="Entfernen">✕</button>
+            </li>
+          </ul>
         </div>
         <div><label class="block text-sm text-gray-900 mb-1 font-medium">Batch-Key (optional)</label><input v-model="pdfForm.batch_key" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="whitepaper-2026" /></div>
-        <button @click="submitPdf" :disabled="loading || !pdfForm.file" class="neu-btn-primary px-4 py-2 text-sm">{{ loading ? 'Verarbeite...' : 'Datei analysieren' }}</button>
+        <button @click="submitPdf" :disabled="loading || !pdfForm.files.length" class="neu-btn-primary px-4 py-2 text-sm disabled:opacity-50">{{ loading ? 'Verarbeite…' : (pdfForm.files.length > 1 ? pdfForm.files.length + ' Dateien analysieren' : 'Datei analysieren') }}</button>
       </div>
 
       <!-- URL -->
