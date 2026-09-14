@@ -37,12 +37,18 @@ class OutputPageController extends Controller
             ->values()
             ->keyBy('content_item_id');
 
+        // Kern-Keywords der Strategie (Content-Strategie-Tab) für die Keyword-Vorschläge
+        $strategyKeywords = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'content_strategy')
+            ->first()?->content['keywords'] ?? [];
+
         return Inertia::render('Output/Index', [
             'strategies' => $strategies,
             'currentStrategy' => $strategy,
             'items' => $items,
             'kpis' => $kpis,
             'learningReport' => $kpiLearning->report($strategy),
+            'strategyKeywords' => array_values(array_filter((array) $strategyKeywords)),
         ]);
     }
 

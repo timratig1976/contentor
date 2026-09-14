@@ -96,18 +96,38 @@ class AnglePageController extends Controller
             }
         }
 
-        // Geladene Templates der Strategie für die Varianten-Generierung
+        // Für diese Strategie ausgewählte Templates aus dem globalen Katalog
+        // (single source of truth: post_templates-Tabelle statt Duplikat in ContentStrategy)
         $templates = [];
+        // Der Strategie zugeordnete Personas (für Stil-Auswahl beim Produzieren)
+        $personas = [];
         if ($angle->strategy) {
             $contentStrategy = \App\Models\ContentStrategy::where('strategy_id', $angle->strategy->id)
                 ->where('key', 'post_templates')
                 ->first();
-            $templates = $contentStrategy?->content['templates'] ?? [];
+            $selectedIds = $contentStrategy?->content['selected'] ?? null;
+
+            $query = \App\Models\PostTemplate::where('active', true);
+            if (is_array($selectedIds)) {
+                $query->whereIn('id', $selectedIds);
+            }
+            $templates = $query->orderBy('format')->orderBy('name')->get();
+
+            $personas = $angle->strategy->personas()
+                ->where('active', true)
+                ->get(['personas.id', 'name', 'role'])
+                ->map(fn ($p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'role' => $p->role,
+                    'is_default' => (bool) $p->pivot?->is_default,
+                ]);
         }
 
         return Inertia::render('Angles/Show', [
             'angle' => $angle,
             'templates' => $templates,
+            'personas' => $personas,
         ]);
     }
 }

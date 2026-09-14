@@ -22,6 +22,45 @@ class StyleStarterSeeder extends Seeder
     {
         $this->seedViscaleBrandVoice();
         $this->seedPersonas();
+        $this->seedContentStrategyKeywords();
+    }
+
+    /**
+     * Kern-Keywords + Themenfokus pro Strategie (Content-Strategie-Tab).
+     * Früher in persona.content_attributes — jetzt strategie-gebunden.
+     */
+    private function seedContentStrategyKeywords(): void
+    {
+        $data = [
+            'viscale' => [
+                'keywords' => ['Pipeline-Hygiene', 'Forecast', 'Property-Regeln', 'RevOps', 'HubSpot-Architektur', 'Datenqualität', 'Pipeline-Review', 'Vertriebssystem'],
+                'topic_focus' => ['Blindflug im Forecast', 'Vertrieb hängt an Personen', 'Datenchaos', 'Leads versickern'],
+            ],
+            'vitalents' => [
+                'keywords' => ['Pflegerecruiting', 'Fachkräftemangel', 'Klinik', 'Bewerberprozess', 'ATS', 'Employer Branding', 'Schichtdienst'],
+                'topic_focus' => ['Fachkräftemangel in Klinik und Pflege', 'Recruiting-Prozesse ohne System', 'Kandidaten springen ab'],
+            ],
+        ];
+
+        foreach ($data as $key => $attrs) {
+            $strategy = Strategy::where('key', $key)->first();
+            if (! $strategy) {
+                continue;
+            }
+
+            $cs = ContentStrategy::firstOrNew([
+                'strategy_id' => $strategy->id,
+                'key' => 'content_strategy',
+            ]);
+            $content = $cs->content ?: [];
+
+            // Nur ergänzen, wenn noch nichts gesetzt ist (manuelle Pflege gewinnt)
+            $content['keywords'] = $content['keywords'] ?? $attrs['keywords'];
+            $content['topic_focus'] = $content['topic_focus'] ?? $attrs['topic_focus'];
+
+            $cs->content = $content;
+            $cs->save();
+        }
     }
 
     private function seedViscaleBrandVoice(): void
@@ -84,7 +123,6 @@ class StyleStarterSeeder extends Seeder
                         'voice' => 'Analytisch-präzise mit Praxis-Kante. Kurze, direkte Sätze. Erst das Problem benennen, dann den Mechanismus erklären, dann die Konsequenz. Du-Form (ihr/euch). Keine Buzzwords ohne Substanz.',
                         'perspective' => 'wir',
                         'emoji_usage' => 'none',
-                        'max_sentence_length' => 18,
                         'core_statements' => [
                             'Mehr Leads lösen kein Strukturproblem — ohne saubere Pipeline-Architektur versickert jede Nachfrage.',
                             'Forecast-Sicherheit ist kein Tool-Feature, sondern das Ergebnis von Datenhygiene und Führungsritualen.',
@@ -96,10 +134,6 @@ class StyleStarterSeeder extends Seeder
                             'verbote' => ['!', 'beste', 'einzigartig', 'revolutionär', 'bucht jetzt', 'demo anfragen'],
                         ],
                         'positioning' => 'Der RevOps-Architekt für den Mittelstand: HubSpot-Systeme, die Forecast-Sicherheit und skalierbaren Vertrieb liefern.',
-                        'content_attributes' => [
-                            'keywords' => ['Pipeline-Hygiene', 'Forecast', 'Property-Regeln', 'RevOps', 'HubSpot-Architektur', 'Datenqualität', 'Pipeline-Review', 'Vertriebssystem'],
-                            'themenfokus' => ['Blindflug im Forecast', 'Vertrieb hängt an Personen', 'Datenchaos', 'Leads versickern'],
-                        ],
                         'forbidden_words' => ['!', 'beste', 'einzigartig', 'revolutionär', 'wir freuen uns', 'bucht jetzt'],
                         'active' => true,
                     ]
@@ -112,7 +146,6 @@ class StyleStarterSeeder extends Seeder
                         'voice' => 'Empathisch, aber klar. Versteht den Alltag in Klinik und Pflege — Schichtdienst, Fachkräftemangel, Zeitdruck. Konkrete Lösungen statt Recruiting-Floskeln. Du-Form (ihr/euch).',
                         'perspective' => 'wir',
                         'emoji_usage' => 'light',
-                        'max_sentence_length' => 20,
                         'core_statements' => [
                             'Fachkräftemangel in der Pflege ist kein Bewerber-Problem, sondern ein Prozess-Problem.',
                             'Kandidaten springen nicht wegen des Gehalts ab — sie springen ab, weil niemand sich meldet.',
@@ -124,10 +157,6 @@ class StyleStarterSeeder extends Seeder
                             'verbote' => ['!', 'beste', 'einzigartig', 'revolutionär'],
                         ],
                         'positioning' => 'Systematisches Recruiting für Klinik und Pflege: Prozesse, die Kandidaten halten statt verlieren.',
-                        'content_attributes' => [
-                            'keywords' => ['Pflegerecruiting', 'Fachkräftemangel', 'Klinik', 'Bewerberprozess', 'ATS', 'Employer Branding', 'Schichtdienst'],
-                            'themenfokus' => ['Fachkräftemangel in Klinik und Pflege', 'Recruiting-Prozesse ohne System', 'Kandidaten springen ab'],
-                        ],
                         'forbidden_words' => ['!', 'beste', 'einzigartig', 'revolutionär'],
                         'active' => true,
                     ]

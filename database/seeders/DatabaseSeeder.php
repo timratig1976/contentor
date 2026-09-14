@@ -11,6 +11,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             StrategySeeder::class,
             ContentTransferSeeder::class,
+            TimRatigPersonaSeeder::class,
             AgentPromptsSeeder::class,
         ]);
     }

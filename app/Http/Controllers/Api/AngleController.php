@@ -122,9 +122,10 @@ class AngleController extends Controller
         $statementType = $data['statement_type']
             ?? $this->rulesService->pickStatementType(null, null, $data['angle']);
 
-        // Funnel: explizit übergeben > default_funnel des ICPs (aus icp_definitions)
+        // Funnel: explizit übergeben > default_funnel des ICPs > Text-Heuristik
         $funnel = $data['funnel']
-            ?? $this->rulesService->resolveIcpFunnel($strategy, $icp);
+            ?? $this->rulesService->resolveIcpFunnel($strategy, $icp)
+            ?? $this->rulesService->guessFunnel($data['angle'])['funnel'];
 
         $angle = Angle::create([
             'strategy_id' => $strategy->id,
@@ -201,7 +202,7 @@ class AngleController extends Controller
             'icp' => 'sometimes|string',
             'pain_cluster' => 'sometimes|string',
             'statement_type' => 'sometimes|string',
-            'funnel' => 'sometimes|in:ToFu,MoFu,BoFu',
+            'funnel' => 'sometimes|nullable|in:ToFu,MoFu,BoFu',
             'viscale_phase' => 'sometimes|string',
             'status' => 'sometimes|string',
             'r_zielgruppe' => 'sometimes|integer|min:1|max:3',

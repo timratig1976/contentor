@@ -5,6 +5,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import UCard from '../../Components/UCard.vue';
 import UInput from '../../Components/UInput.vue';
 import UButton from '../../Components/UButton.vue';
+import ApplicationFlowDiagram from '../../Components/ApplicationFlowDiagram.vue';
 
 const props = defineProps({ settings: Object });
 
@@ -143,6 +144,11 @@ function toggleAll(provider, enabled) {
       </div>
 
       <p v-else class="text-sm text-gray-500 italic">Lade zuerst alle Modelle von EdenAI.</p>
+    </UCard>
+
+    <UCard title="🧭 Wie funktioniert die Content-Erzeugung?" class="mb-6">
+      <p class="text-sm text-gray-600 mb-4">Der komplette Weg eines Posts von der Angle-Auswahl bis zur Freigabe — klicke auf einen Schritt für Details.</p>
+      <ApplicationFlowDiagram />
     </UCard>
   </AppLayout>
 </template>

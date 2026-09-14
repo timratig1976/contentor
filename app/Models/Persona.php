@@ -15,18 +15,14 @@ class Persona extends Model
     protected $fillable = [
         'strategy_id', 'name', 'role', 'voice',
         'core_statements', 'tonality', 'positioning',
-        'content_attributes',
-        'cadence', 'channel_strategies', 'active',
-        'forbidden_words', 'max_sentence_length', 'emoji_usage', 'perspective',
+        'cadence', 'active',
+        'forbidden_words', 'emoji_usage', 'perspective',
     ];
 
     protected $casts = [
         'core_statements' => 'array',
         'tonality' => 'array',
-        'channel_strategies' => 'array',
-        'content_attributes' => 'array',
         'forbidden_words' => 'array',
-        'max_sentence_length' => 'integer',
         'active' => 'boolean',
     ];
 

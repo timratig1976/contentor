@@ -76,8 +76,8 @@ class ContentQualityTest extends TestCase
         $strategy = $this->makeStrategy(['mandatoryCta' => 'Pipeline-Review buchen']);
         $service = app(ContentQualityService::class);
 
-        // ~150 Wörter (über linkedin_post-Minimum 120), keine Verbote, CTA enthalten
-        $clean = str_repeat('Saubere Datenhygiene macht den Forecast planbar und die Pipeline belastbar für jede Entscheidung im Vertrieb. ', 10)
+        // ~150 Wörter (über linkedin_post-Minimum 120), keine Verbote, CTA enthalten, in Absätze gegliedert
+        $clean = str_repeat("Saubere Datenhygiene macht den Forecast planbar und die Pipeline belastbar für jede Entscheidung im Vertrieb.\n\n", 10)
             . 'Mehr dazu im Beitrag. Pipeline-Review buchen und Struktur prüfen.';
 
         $check = $service->ruleCheck($clean, 'linkedin_post', $strategy, []);
@@ -93,7 +93,7 @@ class ContentQualityTest extends TestCase
 
         // LLM-Mock: Fix-Runde liefert sauberen Text (~150 Wörter, CTA enthalten),
         // Review liefert Score — danach ist Runde 2 befundfrei → Loop endet
-        $fixedClean = str_repeat('Saubere Datenhygiene macht den Forecast planbar und die Pipeline belastbar für jede Entscheidung im Vertrieb. ', 10) . 'CTA hier.';
+        $fixedClean = str_repeat("Saubere Datenhygiene macht den Forecast planbar und die Pipeline belastbar für jede Entscheidung im Vertrieb.\n\n", 10) . 'CTA hier.';
         $llm = Mockery::mock(LlmService::class);
         $llm->shouldReceive('chat')->once()
             ->withArgs(fn ($agent) => $agent === 'production')

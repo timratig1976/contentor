@@ -127,12 +127,23 @@ async function confirmDeleteStrategy() {
 }
 
 const forms = reactive({
-    brand_voice: { personality: '', tone: 'direkt', never: [], must: [] },
+    brand_voice: {
+        personality: '',
+        tone_content: 'direkt',
+        tone_ads: 'direkt',
+        tone_sales: 'direkt',
+        language_level: 'fachlich',
+        perspective: 'du_plural',
+        jargon: true,
+        never: [],
+        must: [],
+        examples: [],
+    },
     channel_rules: { channels: [] },
     icp_definitions: { icps: [], default_icp: '' },
     media_logic: { rules: [] },
     editorial_rhythm: { cadence: 'weekly', slots: [] },
-    content_strategy: { pillars: [], goals: '' },
+    content_strategy: { pillars: [], goals: '', keywords: [], topic_focus: [] },
     post_templates: { templates: [] },
 });
 
@@ -309,6 +320,8 @@ async function generateExampleForModal(tpl) {
 function addMediaRule() { forms.media_logic.rules.push({ format: 'image', style: '', aspect_ratio: '1:1', notes: '' }); }
 function addEditorialSlot() { forms.editorial_rhythm.slots.push({ day: 'Monday', channel: 'linkedin', format: 'post', persona: '' }); }
 function addPillar() { forms.content_strategy.pillars.push({ name: '', description: '', icp_focus: [] }); }
+function addStrategyKeyword() { if (!forms.content_strategy.keywords) forms.content_strategy.keywords = []; forms.content_strategy.keywords.push(''); }
+function addTopicFocus() { if (!forms.content_strategy.topic_focus) forms.content_strategy.topic_focus = []; forms.content_strategy.topic_focus.push(''); }
 
 // ---- ICP-Definitionen aus DB initialisieren ----
 function loadIcpFromConfig() {
@@ -429,10 +442,133 @@ onMounted(loadIcpFromConfig);
       <div class="bg-white border border-gray-200 rounded-xl p-6">
         <h3 class="text-sm font-semibold text-gray-900 mb-4">Brand Voice</h3>
         <div class="space-y-4">
-          <div><label class="block text-sm text-gray-900 mb-1 font-medium">Persönlichkeit</label><textarea v-model="forms.brand_voice.personality" rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="z.B. Direkt, analytisch, kein Bullshit, auf Augenhöhe..."></textarea></div>
-          <div><label class="block text-sm text-gray-900 mb-1 font-medium">Tonalität</label><select v-model="forms.brand_voice.tone" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors"><option value="direkt">Direkt & klar</option><option value="beratend">Beratend</option><option value="provokativ">Provokativ</option><option value="inspirierend">Inspirierend</option><option value="analytisch">Analytisch</option></select></div>
-          <div><label class="block text-sm text-gray-700 mb-2">🚫 Niemals verwenden</label><div class="space-y-2 mb-2"><div v-for="(item, i) in (forms.brand_voice.never || [])" :key="i" class="flex gap-2"><input v-model="forms.brand_voice.never[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="z.B. revolutionär" /><button @click="removeItem('brand_voice', 'never', i)" class="text-red-500 hover:text-red-700">✕</button></div></div><button @click="addItem('brand_voice', 'never')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Verbotenes Wort</button></div>
-          <div><label class="block text-sm text-gray-700 mb-2">✅ Immer verwenden</label><div class="space-y-2 mb-2"><div v-for="(item, i) in (forms.brand_voice.must || [])" :key="i" class="flex gap-2"><input v-model="forms.brand_voice.must[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="z.B. Mechanismus" /><button @click="removeItem('brand_voice', 'must', i)" class="text-red-500 hover:text-red-700">✕</button></div></div><button @click="addItem('brand_voice', 'must')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Pflicht-Wort</button></div>
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Persönlichkeit</label>
+            <p class="text-xs text-gray-500 mb-1.5">Konstant, kontextunabhängig. Wenn die Marke eine Person wäre — wer ist sie?</p>
+            <textarea v-model="forms.brand_voice.personality" rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20" placeholder="z.B. Erfahrener RevOps-Praktiker. Analytisch, direkt, ohne Berater-Floskeln. Spricht aus konkreter Delivery-Erfahrung — nicht aus dem Lehrbuch."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Tonalität: kontextabhängig -->
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <h3 class="text-sm font-semibold text-gray-900 mb-1">Tonalität — kontextabhängig</h3>
+        <p class="text-xs text-gray-500 mb-4">Der Ton variiert je nach Situation. Definiere ihn pro Kontext statt eines einzigen globalen Werts.</p>
+        <div class="space-y-3">
+          <div v-for="ctx in [
+            { key: 'tone_content', label: '🎯 Thought Leadership / organischer Content', hint: 'LinkedIn-Posts, Newsletter, Blog — der Kernton der Marke' },
+            { key: 'tone_ads',    label: '💰 Paid Ads / Ad Copy',                        hint: 'Bezahlte Anzeigen — schärfer, handlungsorientierter' },
+            { key: 'tone_sales',  label: '📞 Sales-nah / CTA-Posts',                     hint: 'Direkte Conversion-Inhalte, Angebote, Follow-up' },
+          ]" :key="ctx.key" class="flex items-center gap-4">
+            <div class="flex-1">
+              <p class="text-xs font-medium text-gray-900">{{ ctx.label }}</p>
+              <p class="text-[11px] text-gray-400">{{ ctx.hint }}</p>
+            </div>
+            <select v-model="forms.brand_voice[ctx.key]"
+              class="w-52 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 shrink-0">
+              <option value="direkt">Direkt &amp; klar</option>
+              <option value="provokativ">Provokativ</option>
+              <option value="beratend">Beratend</option>
+              <option value="inspirierend">Inspirierend</option>
+              <option value="analytisch">Analytisch</option>
+              <option value="empathisch">Empathisch</option>
+              <option value="dringend">Dringend / handlungsorientiert</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Sprachebene -->
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <h3 class="text-sm font-semibold text-gray-900 mb-1">Sprachebene</h3>
+        <p class="text-xs text-gray-500 mb-4">Entscheidend für einen konsistenten Stil — in den meisten Brand-Voice-Guides vergessen.</p>
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-900 mb-1">Ansprache (Perspektive)</label>
+            <select v-model="forms.brand_voice.perspective"
+              class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500">
+              <option value="ich">Ich-Form (Gründer/Autor)</option>
+              <option value="du_singular">Du-Form (singular)</option>
+              <option value="du_plural">Ihr-Form (plural, Team)</option>
+              <option value="wir">Wir-Form (Unternehmen)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-900 mb-1">Sprachlevel</label>
+            <select v-model="forms.brand_voice.language_level"
+              class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500">
+              <option value="einfach">Einfach (Laienpublikum)</option>
+              <option value="fachlich">Fachlich (Entscheider + Experten)</option>
+              <option value="akademisch">Akademisch / Research</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-3 pt-5">
+            <input type="checkbox" id="jargon" v-model="forms.brand_voice.jargon" class="rounded border-gray-300 text-green-600 focus:ring-green-500" />
+            <label for="jargon" class="text-sm text-gray-900">
+              Branchenjargon erlaubt
+              <p class="text-[11px] text-gray-400 font-normal">z.B. HubSpot, CRM, RevOps-Begriffe</p>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Wortregeln -->
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <h3 class="text-sm font-semibold text-gray-900 mb-4">Wortregeln</h3>
+        <div class="grid grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm text-gray-700 mb-2 font-medium">🚫 Niemals verwenden</label>
+            <div class="space-y-2 mb-2">
+              <div v-for="(item, i) in (forms.brand_voice.never || [])" :key="i" class="flex gap-2">
+                <input v-model="forms.brand_voice.never[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500" placeholder="z.B. revolutionär" />
+                <button @click="removeItem('brand_voice', 'never', i)" class="text-red-500 hover:text-red-700">✕</button>
+              </div>
+            </div>
+            <button @click="addItem('brand_voice', 'never')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Verbotenes Wort</button>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-700 mb-2 font-medium">✅ Immer verwenden</label>
+            <div class="space-y-2 mb-2">
+              <div v-for="(item, i) in (forms.brand_voice.must || [])" :key="i" class="flex gap-2">
+                <input v-model="forms.brand_voice.must[i]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500" placeholder="z.B. Mechanismus" />
+                <button @click="removeItem('brand_voice', 'must', i)" class="text-red-500 hover:text-red-700">✕</button>
+              </div>
+            </div>
+            <button @click="addItem('brand_voice', 'must')" class="text-sm text-green-600 hover:text-green-700 font-medium">+ Pflicht-Wort</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Vorher/Nachher-Beispiele -->
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">So klingt es — so nicht</h3>
+            <p class="text-xs text-gray-500 mt-0.5">LLMs lernen mehr von einem guten Beispiel als von zehn Regelzeilen.</p>
+          </div>
+          <button @click="forms.brand_voice.examples = [...(forms.brand_voice.examples || []), { bad: '', good: '', context: '' }]"
+            class="px-3 py-1.5 text-sm neu-btn-primary">+ Beispiel</button>
+        </div>
+        <div v-if="!(forms.brand_voice.examples || []).length" class="text-sm text-gray-400 italic py-4 text-center border-2 border-dashed border-gray-200 rounded-lg">
+          Noch keine Beispiele. „So klingt es, so nicht" macht Brand Voice für dich und die KI greifbar.
+        </div>
+        <div v-for="(ex, i) in (forms.brand_voice.examples || [])" :key="i"
+          class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
+          <div class="flex items-center justify-between">
+            <input v-model="ex.context" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-700 mr-3 focus:outline-none focus:border-green-500"
+              placeholder="Kontext: z.B. LinkedIn-Hook, CTA, Antwort auf Kundenfrage…" />
+            <button @click="forms.brand_voice.examples.splice(i, 1)" class="text-red-500 hover:text-red-700 text-sm shrink-0">✕</button>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-red-500 font-semibold mb-1 uppercase">🚫 So nicht</label>
+              <textarea v-model="ex.bad" rows="3" class="w-full bg-red-50/50 border border-red-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-red-400 resize-none" placeholder="Generische, floskelige oder falsche Version…"></textarea>
+            </div>
+            <div>
+              <label class="block text-[11px] text-green-600 font-semibold mb-1 uppercase">✅ So schon</label>
+              <textarea v-model="ex.good" rows="3" class="w-full bg-green-50/50 border border-green-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-green-400 resize-none" placeholder="Konkrete, markentypische Version…"></textarea>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -697,6 +833,24 @@ onMounted(loadIcpFromConfig);
       <div class="bg-white border border-gray-200 rounded-xl p-6">
         <h3 class="text-sm font-semibold text-gray-900 mb-4">Content-Strategie</h3>
         <div class="mb-4"><label class="block text-sm text-gray-900 mb-1 font-medium">Strategische Ziele</label><textarea v-model="forms.content_strategy.goals" rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="Was wollen wir mit Content erreichen?"></textarea></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Kern-Keywords</label>
+            <div class="flex flex-wrap gap-1.5 mb-1.5">
+              <span v-for="(kw, i) in (forms.content_strategy.keywords || [])" :key="i" class="text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1"><input v-model="forms.content_strategy.keywords[i]" class="bg-transparent outline-none w-24 text-xs text-gray-800" placeholder="Keyword" /><button @click="forms.content_strategy.keywords.splice(i, 1)" class="text-red-500">✕</button></span>
+            </div>
+            <button @click="addStrategyKeyword" class="text-sm text-green-600 font-medium">+ Keyword</button>
+            <p class="text-xs text-gray-500 mt-1">Terminologie, die im Content und in den Agent-Prompts verwendet wird.</p>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Themenfokus</label>
+            <div class="flex flex-wrap gap-1.5 mb-1.5">
+              <span v-for="(t, i) in (forms.content_strategy.topic_focus || [])" :key="i" class="text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1"><input v-model="forms.content_strategy.topic_focus[i]" class="bg-transparent outline-none w-32 text-xs text-gray-800" placeholder="Thema" /><button @click="forms.content_strategy.topic_focus.splice(i, 1)" class="text-red-500">✕</button></span>
+            </div>
+            <button @click="addTopicFocus" class="text-sm text-green-600 font-medium">+ Thema</button>
+            <p class="text-xs text-gray-500 mt-1">Schwerpunkt-Themen dieser Strategie.</p>
+          </div>
+        </div>
         <div>
           <div class="flex justify-between mb-2"><label class="text-sm text-gray-700">Content-Pillars</label><button @click="addPillar" class="text-sm text-green-600 font-medium">+ Pillar</button></div>
           <div class="space-y-3">
@@ -711,85 +865,27 @@ onMounted(loadIcpFromConfig);
     </div>
 
     <div v-if="activeTab === 'post_templates'" class="space-y-5">
-
-      <!-- Katalog zum Auswählen -->
-      <div class="bg-white border border-gray-200 rounded-xl p-5">
-        <div class="flex items-center justify-between mb-4">
+      <div class="bg-white border border-gray-200 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-3">
           <div>
-            <h3 class="text-sm font-semibold text-gray-900">Template-Katalog</h3>
-            <p class="text-xs text-gray-500 mt-0.5">Klick = Auswählen/Abwählen. Rechtsklick auf Name = Details + KI-Beispiel.</p>
+            <h3 class="text-sm font-semibold text-gray-900">Post-Templates</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Templates werden jetzt zentral unter <strong>📝 Templates</strong> verwaltet und pro Strategie aktiviert.</p>
           </div>
-          <select v-model="templateFilter" class="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900">
-            <option value="">Alle Formate</option>
-            <option value="linkedin_post">LinkedIn Post</option>
-            <option value="ad_copy">Ad Copy</option>
-            <option value="newsletter_bk">Newsletter BK</option>
-            <option value="newsletter_acquisition">Newsletter Acquisition</option>
-            <option value="landing_page_headlines">Landing Page</option>
-          </select>
+          <a :href="'/templates?strategy=' + (currentStrategy?.key || '')" class="neu-btn-primary px-4 py-2 text-sm">📝 Zum Template-Katalog →</a>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div v-for="tpl in filteredTemplates" :key="tpl.name"
-            class="border border-gray-200 rounded-lg p-3 hover:border-green-300 hover:shadow-sm transition-all cursor-pointer"
-            :class="isTemplateSelected(tpl.name) ? 'ring-2 ring-green-400 border-green-400 bg-green-50/30' : ''">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-sm font-medium text-gray-900 hover:text-green-700" @click.stop="openDetail(tpl)">{{ tpl.name }}</span>
-              <span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ tpl.format }}</span>
-            </div>
-            <p class="text-xs text-gray-500 mb-2" @click="toggleTemplate(tpl)">{{ tpl.description }}</p>
-            <div class="flex flex-wrap gap-1 items-center" @click="toggleTemplate(tpl)">
-              <span v-for="icp in (tpl.best_for || [])" :key="icp" class="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{{ icp }}</span>
-              <span v-if="isTemplateSelected(tpl.name)" class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full ml-auto font-medium">✓ Ausgewählt</span>
-            </div>
-          </div>
+        <div class="bg-gray-50 border border-gray-100 rounded-lg p-4 text-sm text-gray-600">
+          Im Template-Katalog kannst du:<br>
+          <ul class="mt-2 space-y-1 list-disc list-inside text-xs">
+            <li>Templates nach Format gruppiert ansehen (Collapsible-Listen)</li>
+            <li>Per Klick für diese Strategie aktivieren / deaktivieren</li>
+            <li>Eigene Templates manuell anlegen</li>
+            <li>Ein Template per KI aus einem Beispiel-Post ableiten lassen</li>
+            <li>Detailansicht: Struktur, Anwendungsfälle, KI-Beispiel generieren</li>
+          </ul>
         </div>
       </div>
     </div>
 
-    <!-- Template-Detail-Modal -->
-    <div v-if="detailModal" class="fixed inset-0 z-50 flex items-center justify-center" @click.self="closeDetail">
-      <div class="fixed inset-0 bg-black/40"></div>
-      <div class="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-2xl mx-4 z-10 max-h-[80vh] overflow-y-auto">
-        <div class="flex items-center justify-between mb-5">
-          <div>
-            <h3 class="text-lg font-semibold text-gray-900">{{ detailModal.name }}</h3>
-            <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{{ detailModal.format }}</span>
-          </div>
-          <button @click="closeDetail" class="text-gray-400 hover:text-gray-900 text-xl">✕</button>
-        </div>
-
-        <div class="grid grid-cols-2 gap-6 mb-5">
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Struktur</label>
-            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line font-mono">{{ detailModal.structure }}</div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Beispiel</label>
-            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line mb-3 min-h-[100px]">
-              <template v-if="modalGeneratedExample">{{ modalGeneratedExample }}</template>
-              <template v-else>{{ detailModal.example }}</template>
-            </div>
-            <div class="flex items-center gap-3">
-              <button @click="generateExampleForModal(detailModal)" :disabled="modalGenerating"
-                class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
-                {{ modalGenerating ? 'Generiert…' : '🤖 Beispiel generieren' }}
-              </button>
-              <button v-if="modalGeneratedExample" @click="modalGeneratedExample = ''"
-                class="text-xs text-gray-500 underline">Zurücksetzen</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-3 pt-3 border-t border-gray-200">
-          <button @click="toggleTemplate(detailModal); closeDetail()"
-            class="px-4 py-2 text-sm rounded-lg font-medium"
-            :class="isTemplateSelected(detailModal.name) ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100' : 'bg-green-600 text-white hover:bg-green-700'">
-            {{ isTemplateSelected(detailModal.name) ? '✕ Aus Strategie entfernen' : '+ In Strategie übernehmen' }}
-          </button>
-          <button @click="closeDetail" class="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Schließen</button>
-        </div>
-      </div>
-    </div>
     <!-- Personas: globale Personas dieser Strategie zuordnen (nicht anlegen) -->
     <div v-if="activeTab === 'content_personas'" class="space-y-5">
       <div class="flex justify-between items-center">

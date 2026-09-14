@@ -30,7 +30,7 @@ class ContentController extends Controller
     public function recommendStatement(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk,blog_post',
+            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter,landing_page_headlines,blog_post',
             'funnel' => 'nullable|string|in:ToFu,MoFu,BoFu',
             'icp' => 'nullable|string',
             'angle' => 'nullable|string',
@@ -129,7 +129,7 @@ class ContentController extends Controller
     {
         $validated = $request->validate([
             'angle_id' => 'required|string|exists:angles,id',
-            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter_acquisition,landing_page_headlines,newsletter_bk,blog_post',
+            'format' => 'required|string|in:linkedin_post,ad_copy,newsletter,landing_page_headlines,blog_post',
             'pattern' => 'nullable|string|in:contrarian_take,data_drop,mistake_post,framework',
             'persona_id' => 'nullable|integer|exists:personas,id',
             'metric' => 'nullable|string',
@@ -182,10 +182,8 @@ class ContentController extends Controller
                     'positioning' => $persona->positioning,
                     'core_statements' => $persona->core_statements,
                     'topics' => $mapping['topic_clusters'] ?? [],
-                    'content_attributes' => $persona->content_attributes,
                     'perspective' => $persona->perspective,
                     'emoji_usage' => $persona->emoji_usage,
-                    'max_sentence_length' => $persona->max_sentence_length,
                     'forbidden_words' => $persona->forbidden_words,
                 ];
             }
@@ -197,6 +195,30 @@ class ContentController extends Controller
                     'role' => $persona->role,
                     'voice' => $persona->voice,
                     'tonality' => $persona->tonality,
+                ];
+            }
+        }
+
+        // Kein Persona-Kontext → Default-Persona der Strategie nutzen (is_default im Mapping)
+        if (! $personaCtx) {
+            $defaultPersona = $strategy->personas()
+                ->where('active', true)
+                ->wherePivot('is_default', true)
+                ->first();
+            if ($defaultPersona) {
+                $mapping = $defaultPersona->strategyMapping($strategy->id);
+                $personaCtx = [
+                    'persona_id' => $defaultPersona->id,
+                    'name' => $defaultPersona->name,
+                    'role' => $defaultPersona->role,
+                    'voice' => $defaultPersona->voice,
+                    'tonality' => $defaultPersona->tonality,
+                    'positioning' => $defaultPersona->positioning,
+                    'core_statements' => $defaultPersona->core_statements,
+                    'topics' => $mapping['topic_clusters'] ?? [],
+                    'perspective' => $defaultPersona->perspective,
+                    'emoji_usage' => $defaultPersona->emoji_usage,
+                    'forbidden_words' => $defaultPersona->forbidden_words,
                 ];
             }
         }
@@ -488,9 +510,10 @@ class ContentController extends Controller
         $systemPrompt .= "\n\n---\nAKTUELLER AUFTRAG: Du erhältst gleich einen konkreten Produktionsauftrag. "
             . "Führe KEINE Tool-Aufrufe aus und beschreibe keine Vorgehensweise — schreibe direkt den fertigen Content-Text, sonst nichts.";
 
-        $channelRules = $strategyCtx['channel_rules'][$format] ?? $this->defaultChannelRules($format);
+        // Kanal-Regeln aus zentraler Quelle (ContentRulesService), DB-Overrides der Strategie mergen automatisch
+        $channelRules = $this->rulesService->channelRules($format, $strategyCtx['channel_rules'] ?? []);
         $brandVoice = $strategyCtx['brand_voice'] ?? [];
-        $template = $pattern ? $this->findTemplate($strategyCtx['post_templates'] ?? [], $pattern) : null;
+        $template = $pattern ? $this->findTemplate($strategy, $strategyCtx['post_templates'] ?? [], $pattern) : null;
 
         $prompt = $this->buildContentPrompt($angle, $params, $format, $template, $channelRules, $brandVoice, $personaCtx, $strategy);
 
@@ -524,27 +547,42 @@ class ContentController extends Controller
 
     /**
      * Findet das passende Post-Template zum Varianten-Pattern.
-     * Unterstützt beide Formate:
-     * - neu: {templates: [{name, format, structure, example, description}, ...]}
-     * - alt: {data_drop: {label, beschreibung, struktur, beispiel_hook}}
+     * Quelle ist der globale PostTemplate-Katalog, gefiltert auf die für
+     * diese Strategie ausgewählten IDs (ContentStrategy.key='post_templates'
+     * → content['selected']). Fallback auf das Legacy-Array-Schema, falls
+     * eine Strategie noch keine Katalog-Auswahl hat.
      */
-    private function findTemplate(array $postTemplates, string $pattern): ?array
+    private function findTemplate(Strategy $strategy, array $postTemplatesCtx, string $pattern): ?array
     {
-        $list = $postTemplates['templates'] ?? null;
+        $needles = match ($pattern) {
+            'contrarian'  => ['contrarian'],
+            'data_drop'   => ['data'],
+            'mistake_post' => ['mistake', 'fehler'],
+            'framework'   => ['framework', 'modell'],
+            'story'       => ['story', 'storytelling'],
+            'listicle'    => ['listicle', 'list'],
+            'question'    => ['question', 'frage'],
+            default       => [$pattern],
+        };
 
+        $selectedIds = $postTemplatesCtx['selected'] ?? null;
+        if (is_array($selectedIds)) {
+            $catalog = \App\Models\PostTemplate::whereIn('id', $selectedIds)->where('active', true)->get();
+            foreach ($catalog as $tpl) {
+                $name = strtolower($tpl->name);
+                foreach ($needles as $needle) {
+                    if (str_contains($name, $needle)) {
+                        return $tpl->toArray();
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        // Legacy-Fallback: altes Array-Schema direkt in ContentStrategy
+        $list = $postTemplatesCtx['templates'] ?? null;
         if (is_array($list)) {
-            // Pattern → Namensbestandteile, nach denen im Template-Namen gesucht wird
-            $needles = match ($pattern) {
-                'contrarian'  => ['contrarian'],
-                'data_drop'   => ['data'],
-                'mistake_post' => ['mistake', 'fehler'],
-                'framework'   => ['framework', 'modell'],
-                'story'       => ['story', 'storytelling'],
-                'listicle'    => ['listicle', 'list'],
-                'question'    => ['question', 'frage'],
-                default       => [$pattern],
-            };
-
             foreach ($list as $tpl) {
                 $name = strtolower((string) ($tpl['name'] ?? ''));
                 foreach ($needles as $needle) {
@@ -557,49 +595,7 @@ class ContentController extends Controller
             return null;
         }
 
-        // Legacy-Format: direkter Key-Zugriff
-        return $postTemplates[$pattern] ?? null;
-    }
-
-    /**
-     * Sinnvolle Kanal-Standardregeln, falls keine channel_rules konfiguriert sind.
-     */
-    private function defaultChannelRules(string $format): array
-    {
-        return match ($format) {
-            'linkedin_post' => [
-                'word_count' => ['min' => 120, 'max' => 220],
-                'hook_max_words' => 12,
-                'structure' => ['Hook (Zeile 1, max 12 Wörter, provokante These)', 'Kontext/Problem (2-3 Sätze)', 'Mechanismus/Beleg (3-5 Sätze, konkreter Nutzen)', 'Konsequenz für den Leser (1-2 Sätze)', 'Soft CTA (1 Satz)'],
-                'cta_style' => 'Soft CTA — Frage oder Einladung zum Austausch, kein harter Verkauf',
-            ],
-            'ad_copy' => [
-                'primary_text_max_chars' => 125,
-                'headline_max_chars' => 40,
-                'structure' => ['Primary Text (max 125 Zeichen)', 'Headline (max 40 Zeichen)', 'Description', 'CTA'],
-                'cta_style' => 'Klarer Handlungs-CTA',
-            ],
-            'newsletter_acquisition' => [
-                'word_count' => ['min' => 200, 'max' => 400],
-                'structure' => ['Betreff (max 50 Zeichen)', 'Preview-Text', 'Body (Problem → Lösung → Beweis)', 'CTA'],
-                'cta_style' => 'Ein klarer CTA-Link',
-            ],
-            'newsletter_bk' => [
-                'word_count' => ['min' => 150, 'max' => 350],
-                'structure' => ['Betreff', 'Persönliche Einleitung', 'Hauptteil (1-2 konkrete Punkte)', 'Next Step', 'Sign-off'],
-                'cta_style' => 'Konkreter nächster Schritt',
-            ],
-            'landing_page_headlines' => [
-                'structure' => ['Hero Headline (max 20 Wörter)', 'Sub-Headline (max 30 Wörter)', '3 Bullet Points', 'CTA-Button-Text'],
-                'cta_style' => 'Kurzer Button-Text (2-4 Wörter)',
-            ],
-            'blog_post' => [
-                'word_count' => ['min' => 400, 'max' => 800],
-                'structure' => ['Titel (H1, einprägsam, max 60 Zeichen)', 'Einleitung (Hook + These)', '2-4 Absätze mit je einem Punkt', 'Fazit + CTA'],
-                'cta_style' => 'CTA am Ende',
-            ],
-            default => [],
-        };
+        return $postTemplatesCtx[$pattern] ?? null;
     }
 
     /**
@@ -639,6 +635,10 @@ class ContentController extends Controller
             if ($tplStructure) {
                 $structure = is_array($tplStructure) ? implode(' → ', $tplStructure) : str_replace("\n", ' → ', $tplStructure);
                 $lines[] = "Struktur (zwingend einhalten, jeder Punkt = eigener Absatz): " . $structure;
+                // Kontext-Absatz erzwingen, falls die Template-Struktur direkt mit der Liste startet
+                if (!str_contains(mb_strtolower($structure), 'kontext')) {
+                    $lines[] = "Struktur-Hinweis: Hook → Kontext/Problem (eigener Absatz, 2-3 Sätze, BEVOR der erste Listenpunkt beginnt) → " . $structure;
+                }
             }
             if ($tplExample) {
                 $lines[] = "Beispiel (nur als Stil-Referenz, NICHT kopieren): \"{$tplExample}\"";
@@ -659,16 +659,33 @@ class ContentController extends Controller
             if (!empty($personaCtx['voice'])) {
                 $lines[] = "Sprachstil: {$personaCtx['voice']}";
             }
+            // Tonalitäts-Details (stil, perspektive, satzrhythmus, konkretion, verbote)
+            $ton = $personaCtx['tonality'] ?? [];
+            if (!empty($ton['stil'])) {
+                $lines[] = "Tonalität: {$ton['stil']}";
+            }
+            if (!empty($ton['perspektive'])) {
+                $lines[] = "Perspektive: {$ton['perspektive']}";
+            }
+            if (!empty($ton['satzrhythmus'])) {
+                $lines[] = "Satzrhythmus: {$ton['satzrhythmus']}";
+            }
+            if (!empty($ton['konkretion'])) {
+                $lines[] = "Konkretion: {$ton['konkretion']}";
+            }
+            if (!empty($ton['verbote'])) {
+                $lines[] = "VERBOTEN (Tonalität): " . implode(', ', (array) $ton['verbote']);
+            }
+            if (!empty($personaCtx['positioning'])) {
+                $lines[] = "Positionierung: {$personaCtx['positioning']}";
+            }
             if (!empty($personaCtx['perspective'])) {
-                $lines[] = "Perspektive: {$personaCtx['perspective']}";
+                $lines[] = "Erzählperspektive: {$personaCtx['perspective']}";
             }
             if (!empty($personaCtx['emoji_usage']) && $personaCtx['emoji_usage'] !== 'none') {
                 $lines[] = "Emoji-Nutzung: {$personaCtx['emoji_usage']}";
             } elseif (!empty($personaCtx['emoji_usage']) && $personaCtx['emoji_usage'] === 'none') {
                 $lines[] = "Emoji-Nutzung: keine Emojis verwenden";
-            }
-            if (!empty($personaCtx['max_sentence_length'])) {
-                $lines[] = "Max. Satzlänge: {$personaCtx['max_sentence_length']} Wörter";
             }
             if (!empty($personaCtx['forbidden_words'])) {
                 $lines[] = "VERBOTENE WÖRTER (Persona): " . implode(', ', (array) $personaCtx['forbidden_words']);
@@ -700,8 +717,8 @@ class ContentController extends Controller
                 }
             }
         }
-        // Brand Voice: unterstützt beide Schemata —
-        // legacy {rules: [...]} und Templates-UI {personality, tone, never, must}
+        // Brand Voice: unterstützt legacy {rules:[...]} + neues Schema
+        // (personality, tone_content/ads/sales, perspective, language_level, jargon, must, never, examples)
         $voiceRules = $brandVoice['rules'] ?? [];
         if ($voiceRules) {
             $lines[] = "BRAND VOICE:\n- " . implode("\n- ", $voiceRules);
@@ -710,8 +727,29 @@ class ContentController extends Controller
         if (!empty($brandVoice['personality'])) {
             $voiceLines[] = "Persönlichkeit: {$brandVoice['personality']}";
         }
-        if (!empty($brandVoice['tone'])) {
-            $voiceLines[] = "Tonalität: {$brandVoice['tone']}";
+        // Kontextspezifischer Ton: je nach Format den passenden Ton wählen
+        $contextTone = match ($format) {
+            'ad_copy'                  => $brandVoice['tone_ads'] ?? null,
+            'landing_page_headlines'   => $brandVoice['tone_sales'] ?? $brandVoice['tone_ads'] ?? null,
+            'linkedin_post', 'blog_post', 'newsletter' => $brandVoice['tone_content'] ?? null,
+            default                    => null,
+        };
+        $contextTone ??= $brandVoice['tone'] ?? null; // Legacy-Fallback
+        if ($contextTone) {
+            $voiceLines[] = "Tonalität für dieses Format: {$contextTone}";
+        }
+        if (!empty($brandVoice['perspective'])) {
+            $perspLabels = [
+                'ich' => 'Ich-Form (Gründer/Autor)', 'du_singular' => 'Du-Form (singular)',
+                'du_plural' => 'Ihr-Form (plural)', 'wir' => 'Wir-Form (Unternehmen)',
+            ];
+            $voiceLines[] = "Ansprache: " . ($perspLabels[$brandVoice['perspective']] ?? $brandVoice['perspective']);
+        }
+        if (!empty($brandVoice['language_level'])) {
+            $voiceLines[] = "Sprachlevel: {$brandVoice['language_level']}";
+        }
+        if (isset($brandVoice['jargon']) && !$brandVoice['jargon']) {
+            $voiceLines[] = "Kein Branchenjargon — für alle verständlich formulieren";
         }
         if (!empty($brandVoice['must'])) {
             $voiceLines[] = "IMMER tun: " . implode('; ', (array) $brandVoice['must']);
@@ -721,6 +759,21 @@ class ContentController extends Controller
         }
         if ($voiceLines) {
             $lines[] = "BRAND VOICE (Strategie):\n- " . implode("\n- ", $voiceLines);
+        }
+        // Vorher/Nachher-Beispiele als Few-Shot in den Prompt
+        $bvExamples = array_values(array_filter((array) ($brandVoice['examples'] ?? []), fn ($ex) => !empty($ex['good'])));
+        if ($bvExamples) {
+            $lines[] = "";
+            $lines[] = "BRAND VOICE BEISPIELE (orientiere dich am Stil, nicht am Inhalt):";
+            foreach (array_slice($bvExamples, 0, 2) as $i => $ex) {
+                if (!empty($ex['context'])) {
+                    $lines[] = "Kontext: {$ex['context']}";
+                }
+                if (!empty($ex['bad'])) {
+                    $lines[] = "Nicht so: \"{$ex['bad']}\"";
+                }
+                $lines[] = "So: \"{$ex['good']}\"";
+            }
         }
 
         // ═══ LAYER 3: ZIEL-LAYER (Kanal, Format, CTA) ═══
@@ -733,8 +786,17 @@ class ContentController extends Controller
         if (!empty($channelRules['hook_max_words'])) {
             $rulesText[] = "Hook (Zeile 1): max {$channelRules['hook_max_words']} Wörter, provokante These";
         }
+        if (!empty($channelRules['visible_hook_max_chars'])) {
+            $rulesText[] = "Sichtbarer Bereich: Die ersten ~{$channelRules['visible_hook_max_chars']} Zeichen sind vor der ‚…mehr anzeigen'-Falte sichtbar — Hook und Kernaussage MÜSSEN komplett in diesem Fenster stehen (Zeile 1-2).";
+        }
+        if (!empty($channelRules['subject_max_chars'])) {
+            $rulesText[] = "Betreff: max {$channelRules['subject_max_chars']} Zeichen";
+        }
+        if (!empty($channelRules['title_max_chars'])) {
+            $rulesText[] = "Titel: max {$channelRules['title_max_chars']} Zeichen";
+        }
         if (!empty($channelRules['structure'])) {
-            $rulesText[] = "Aufbau: " . implode(' → ', $channelRules['structure']);
+            $rulesText[] = "Aufbau (Orientierung, keine starre Checkliste — variiere Reihenfolge/Gewichtung): " . implode(' → ', $channelRules['structure']);
         }
         if (!empty($channelRules['cta_style'])) {
             $rulesText[] = "CTA: {$channelRules['cta_style']}";
@@ -756,15 +818,77 @@ class ContentController extends Controller
 
         if ($format === 'blog_post') {
             $lines[] = "";
-            $lines[] = "Gib in der ERSTEN Zeile den Blog-Titel (H1, einprägsam, max 60 Zeichen) aus, "
+            $lines[] = "Gib in der ERSTEN Zeile den Blog-Titel aus (einprägsam, max 60 Zeichen, OHNE # oder andere Markdown-Zeichen), "
                 . "danach eine Leerzeile und anschließend den Fließtext. "
                 . "Der Titel darf NICHT identisch mit der Angle-Formulierung sein.";
         }
 
         $lines[] = "";
+        $lines[] = "Formatierung: KEIN Markdown (keine **, keine #-Überschriften). Nur Zeilenumbrüche.";
+        $lines[] = $this->paragraphFormattingRule($format);
+        $lines[] = "";
+        $lines[] = $this->humanWritingConstraints();
+        $lines[] = "";
         $lines[] = "Gib NUR den Content-Text aus.";
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Absatz-Regel: erzwingt sichtbare Absatztrennung (Leerzeile zwischen
+     * Sinnabschnitten), damit LinkedIn/Newsletter-Posts nicht als Fließtext-
+     * Wand wirken — unabhängig vom inhaltlichen Aufbau (Templates bleiben
+     * inhaltlich unverändert, nur die visuelle Gliederung wird erzwungen).
+     */
+    private function paragraphFormattingRule(string $format): string
+    {
+        if ($format === 'blog_post') {
+            return "Absätze: Jeder Gedankenschritt bekommt einen eigenen Absatz (Leerzeile dazwischen). "
+                . "Absätze sind 2-4 Sätze lang — keine Textwand, aber auch nicht jeder Satz einzeln.";
+        }
+
+        return "Absätze: NIEMALS alles als einen einzigen Fließtext-Block schreiben. "
+            . "Trenne Hook, Kontext, Mechanismus/Beleg, Konsequenz und CTA jeweils durch eine Leerzeile in eigene Absätze (2-3 Sätze je Absatz, der Hook darf 1 Zeile bleiben). "
+            . "So bleibt die inhaltliche Struktur erkennbar, aber der Text wirkt nicht wie eine Wand aus Text.";
+    }
+
+    /**
+     * Anti-KI-Sound-Block: erzwingt Variation und verbietet die typischsten
+     * LLM-Rhetorik-Tics, die generierten Text sofort als "von einer KI
+     * geschrieben" verraten. Eine Instruktion wird pro Aufruf zufällig
+     * gewählt, damit nicht jeder Post exakt dieselbe Stilanweisung bekommt.
+     */
+    private function humanWritingConstraints(): string
+    {
+        $lines = [];
+        $lines[] = "## MENSCHLICHKEIT (zwingend)";
+        $lines[] = "VERBOTEN — diese KI-Textmuster NIEMALS verwenden:";
+        $lines[] = "- Die Antithese-Formel \"Das klingt nach X. Es ist Y.\" oder \"Das wirkt wie X. In Wahrheit ist es Y.\" (und jede Variante davon)";
+        $lines[] = "- Perfekt parallele 3er-Aufzählungen mit Doppelpunkt (\"kein A, kein B, kein C\" / \"weder X noch Y noch Z\")";
+        $lines[] = "- Ein isolierter Merksatz/Aphorismus als eigene Zeile am Absatzende (\"Das Wissen sitzt im Kopf.\"-Stil)";
+        $lines[] = "- Rhetorische Frage-Antwort-Muster (\"Warum ist das so? Weil...\")";
+        $lines[] = "- Übergänge wie \"Das Ergebnis:\", \"Die Konsequenz:\", \"Fazit:\" als Einzeiler vor einer Aussage";
+        $lines[] = $this->randomHumanTic();
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Eine von mehreren gleichwertigen "Unperfektheits"-Anweisungen, zufällig
+     * pro Generierung gewählt — sorgt für Varianz zwischen Posts, die sonst
+     * alle nach demselben Muster klingen würden.
+     */
+    private function randomHumanTic(): string
+    {
+        $tics = [
+            'Lass einen Gedanken bewusst unfertig oder hänge einen Nebengedanken mit "—" an, wie beim Sprechen.',
+            'Baue einen leicht unrunden Satz ein (zu lang oder mit Gedankensprung) statt durchgängig glatter Syntax.',
+            'Verzichte auf eine klare Drei-Akt-Struktur — steig mitten in einen Gedanken ein, ohne ihn erst anzukündigen.',
+            'Nutze eine leicht umgangssprachliche Wendung oder einen Halbsatz, der nicht perfekt grammatisch ist.',
+            'Wiederhole ein Wort bewusst statt ein elegantes Synonym zu suchen — wie ein Mensch es beim Schreiben tun würde.',
+        ];
+
+        return 'ZUSÄTZLICH: ' . $tics[array_rand($tics)];
     }
 
     /**
@@ -791,7 +915,7 @@ class ContentController extends Controller
             }
         }
 
-        if (in_array($format, ['newsletter_acquisition', 'newsletter_bk'], true)) {
+        if (in_array($format, ['newsletter'], true)) {
             return mb_substr($lines[0] ?? mb_substr($angle->angle, 0, 80), 0, 120);
         }
 

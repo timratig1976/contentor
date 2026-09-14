@@ -22,7 +22,6 @@ class PersonaApiTest extends TestCase
             'positioning' => 'Thought Leader',
             'core_statements' => ['CRM ist kein Tool-Problem'],
             'tonality' => ['style' => 'direkt', 'do' => ['Mechanismus'], 'dont' => ['Buzzwords']],
-            'content_attributes' => ['maxLength' => 2000, 'tone' => 'direkt', 'formats' => ['linkedin_post'], 'keywords' => ['CRM']],
             'cadence' => 'weekly',
             'active' => true,
         ]);

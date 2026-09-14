@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-const props = defineProps({ angle: Object, templates: Array });
+const props = defineProps({ angle: Object, templates: Array, personas: Array });
 
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 
@@ -73,6 +73,10 @@ async function updateRanking() {
 const generating = ref(false);
 const selectedTemplates = ref([]);
 const activeFormat = ref('linkedin_post');
+// Stil/Persona: vorausgewählt = Default-Persona der Strategie (is_default)
+const selectedPersona = ref(
+    (props.personas || []).find(p => p.is_default)?.id || props.personas?.[0]?.id || '',
+);
 const statementType = ref(props.angle.statement_type || 'Direkt');
 const statementReason = ref('');
 const statementHint = ref('');
@@ -80,56 +84,107 @@ const statementOptions = ['Direkt', 'Drastisch', 'Bedrohlich', 'Gain', 'Mechanis
 
 const formatLabels = {
     linkedin_post: 'LinkedIn Post', ad_copy: 'Ad Copy',
-    newsletter_acquisition: 'Newsletter', newsletter_bk: 'Newsletter BK',
+    newsletter: 'Newsletter',
     landing_page_headlines: 'Landing Page', blog_post: 'Blog Post',
 };
 const formatIcons = {
     linkedin_post: '💼', ad_copy: '📣',
-    newsletter_acquisition: '📧', newsletter_bk: '💌',
+    newsletter: '📧',
     landing_page_headlines: '🌐', blog_post: '📰',
 };
 const formatDesc = {
     linkedin_post: 'Hook → Mechanismus → Beweis → Soft-CTA.',
     ad_copy: 'Primary Text (max 125 Z.) → Headline (max 40 Z.) → CTA.',
-    newsletter_acquisition: 'Betreff → Preview → Body → CTA.',
-    newsletter_bk: 'Betreff → Einleitung → Hauptteil → Next Step.',
+    newsletter: 'Betreff → Einleitung/Preview → Hauptteil → CTA/Next Step.',
     landing_page_headlines: 'Hero Headline → Sub → 3 Bullets → CTA.',
     blog_post: 'Einleitung, Absätze, Fazit.',
 };
+// Tooltip-Texte für jedes Format — wird dem User in der Sidebar angezeigt
+const formatTooltips = {
+    linkedin_post: 'Organischer LinkedIn-Post. Stärke: Reichweite, Thought Leadership, Engagement. Ideal für alle Funnel-Stufen.',
+    ad_copy: 'Bezahlte Anzeige (Meta / LinkedIn Ads). Kurz, pain-fokussiert, direkte Handlungsaufforderung. Höheres Budget nötig.',
+    newsletter: 'E-Mail an deine Liste. Zwei Varianten: Akquise (neue Leads, persuasiv) oder Bestandskunden (nah, konkret, Mehrwert). Wähle das passende Template.',
+    landing_page_headlines: 'Texte für eine Conversion-Page. Kein Storytelling, nur Klarheit: Was bekomme ich? Warum jetzt? Was soll ich tun?',
+    blog_post: 'Längerer Artikel mit SEO-Potenzial oder Tiefgang. Gut für MoFu: Leser kennen das Problem, suchen den Mechanismus.',
+};
 
-// Fallback-Templates für Formate, die keine eigenen Template-Definitionen haben
+// Fallback-Templates (nur für Formate ohne DB-Einträge)
 const defaultTemplatesForFormat = {
     blog_post: [
-        { name: 'Classic Blog Post', format: 'blog_post', description: 'Einleitung → 3 Absätze → Fazit mit CTA', pattern: 'framework' },
-        { name: 'Problem-Lösung Blog', format: 'blog_post', description: 'Problem aufzeigen → Lösung erklären → CTA', pattern: 'question' },
-        { name: 'Storytelling Blog', format: 'blog_post', description: 'Anekdote als Aufhänger → Learnings → Fazit', pattern: 'story' },
+        { name: 'Classic Blog Post', format: 'blog_post', description: 'Einleitung → 3 Absätze → Fazit mit CTA', funnel_stages: ['mofu'], pattern: 'framework' },
+        { name: 'Problem-Lösung Blog', format: 'blog_post', description: 'Problem aufzeigen → Lösung erklären → CTA', funnel_stages: ['mofu', 'bofu'], pattern: 'question' },
+        { name: 'Storytelling Blog', format: 'blog_post', description: 'Anekdote als Aufhänger → Learnings → Fazit', funnel_stages: ['mofu'], pattern: 'story' },
     ],
     ad_copy: [
-        { name: 'Direct Response Ad', format: 'ad_copy', description: 'Pain → Versprechen → CTA', pattern: 'contrarian' },
-        { name: 'Data-Driven Ad', format: 'ad_copy', description: 'Zahl als Hook → Nutzen → CTA', pattern: 'data_drop' },
+        { name: 'Direct Response Ad', format: 'ad_copy', description: 'Pain → Versprechen → CTA', funnel_stages: ['tofu', 'mofu'], pattern: 'contrarian' },
+        { name: 'Data-Driven Ad', format: 'ad_copy', description: 'Zahl als Hook → Nutzen → CTA', funnel_stages: ['tofu'], pattern: 'data_drop' },
     ],
-    newsletter_acquisition: [
-        { name: 'Acquisition Newsletter', format: 'newsletter_acquisition', description: 'Betreff → Problem → Lösung → CTA', pattern: 'question' },
-    ],
-    newsletter_bk: [
-        { name: 'Bestandskunden Newsletter', format: 'newsletter_bk', description: 'Persönlich → 1-2 Punkte → Next Step', pattern: 'story' },
+    newsletter: [
+        { name: 'Newsletter — Akquise', format: 'newsletter', description: 'Betreff → Problem → Lösung → CTA', funnel_stages: ['tofu', 'mofu'], pattern: 'question' },
+        { name: 'Newsletter — Bestandskunden', format: 'newsletter', description: 'Persönlich → 1-2 Punkte → Next Step', funnel_stages: ['mofu', 'bofu'], pattern: 'story' },
     ],
     landing_page_headlines: [
-        { name: 'Hero Headline Set', format: 'landing_page_headlines', description: 'Hero → Sub → Bullets → CTA', pattern: 'framework' },
+        { name: 'Hero Headline Set', format: 'landing_page_headlines', description: 'Hero → Sub → Bullets → CTA', funnel_stages: ['bofu'], pattern: 'framework' },
     ],
 };
 
 const availableFormats = computed(() => {
     const fmts = new Set((props.templates || []).map(t => t.format));
+    // Neue konsolidierte Format-Namen sicherstellen
     Object.keys(defaultTemplatesForFormat).forEach(f => fmts.add(f));
     if (!fmts.has('linkedin_post')) fmts.add('linkedin_post');
+    // Legacy-Formate entfernen falls vorhanden
+    fmts.delete('newsletter_bk');
+    fmts.delete('newsletter_acquisition');
     return [...fmts];
 });
 
+// Templates für aktuelles Format, mit Funnel-Priorisierung nach Angle-Funnel
+const angleFunnel = computed(() => props.angle.funnel || null); // 'ToFu', 'MoFu', 'BoFu' oder null
+
+// Funnel direkt im Header editierbar (ändert Template-Vorschläge in der Sidebar)
+const funnelValue = ref(props.angle.funnel || '');
+async function setFunnel() {
+    const value = funnelValue.value || null;
+    await fetch(`/api/angles/${props.angle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf(), 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ funnel: value }),
+    });
+    props.angle.funnel = value;
+    // Statement-Empfehlung hängt vom Funnel ab → neu berechnen
+    recommendStatement();
+}
+
 const filteredTemplates = computed(() => {
-    const stored = (props.templates || []).filter(t => t.format === activeFormat.value);
-    return stored.length ? stored : (defaultTemplatesForFormat[activeFormat.value] || []);
+    const stored = (props.templates || []).filter(t =>
+        t.format === activeFormat.value || (t.format === 'newsletter_bk' || t.format === 'newsletter_acquisition') && activeFormat.value === 'newsletter'
+    );
+    const list = stored.length ? stored : (defaultTemplatesForFormat[activeFormat.value] || []);
+
+    if (!angleFunnel.value) return list;
+
+    const funnelKey = angleFunnel.value.toLowerCase(); // 'tofu', 'mofu', 'bofu'
+    return [...list].sort((a, b) => {
+        const aMatch = (a.funnel_stages || []).includes(funnelKey);
+        const bMatch = (b.funnel_stages || []).includes(funnelKey);
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+    });
 });
+
+// Funnel-Erklärungen für den User
+const funnelLabels = { tofu: 'ToFu', mofu: 'MoFu', bofu: 'BoFu' };
+const funnelTooltips = {
+    tofu: 'Top of Funnel — Awareness: Zielgruppe kennt dich noch nicht. Ziel: Aufmerksamkeit, Neugier, ersten Eindruck hinterlassen.',
+    mofu: 'Middle of Funnel — Consideration: Zielgruppe kennt das Problem, sucht Lösungen. Ziel: Vertrauen aufbauen, Methodik zeigen.',
+    bofu: 'Bottom of Funnel — Decision: Zielgruppe entscheidet sich gerade. Ziel: letzten Zweifel nehmen, konvertieren.',
+};
+function funnelMatch(tpl) {
+    if (!angleFunnel.value) return null;
+    return (tpl.funnel_stages || []).includes(angleFunnel.value.toLowerCase());
+}
 
 function selectFormat(fmt) { activeFormat.value = fmt; selectedTemplates.value = []; recommendStatement(); }
 function toggleTemplate(tpl) {
@@ -220,6 +275,7 @@ async function generateVariants() {
             body: JSON.stringify({
                 angle_id: props.angle.id, strategy: props.angle.strategy?.key, format: activeFormat.value,
                 statement_type: statementType.value,
+                persona_id: selectedPersona.value || null,
                 variants_count: selectedTemplates.value.length, variant_patterns: patterns,
             }),
         });
@@ -466,11 +522,22 @@ onMounted(recommendStatement);
                         <option v-for="o in statusOptions" :key="o" :value="o">{{ statusLabels[o] }}</option>
                     </select>
                 </div>
-                <div class="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
+                <div class="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs items-center">
                     <span><span class="text-gray-400">ICP</span> <span class="text-gray-800 font-medium">{{ angle.icp || '—' }}</span></span>
                     <span><span class="text-gray-400">Cluster</span> <span class="text-gray-800">{{ angle.pain_cluster || '—' }}</span></span>
                     <span><span class="text-gray-400">Statement</span> <span class="text-gray-800">{{ angle.statement_type || '—' }}</span></span>
-                    <span><span class="text-gray-400">Funnel</span> <span class="text-gray-800">{{ angle.funnel || '—' }}</span></span>
+                    <span class="flex items-center gap-1">
+                        <span class="text-gray-400 cursor-help" title="Funnel-Stufe: ToFu = Zielgruppe kennt dich nicht (Aufmerksamkeit). MoFu = sucht Lösung (Vertrauen). BoFu = entscheidet sich (Conversion). Steuert die Template-Vorschläge unten rechts.">ⓘ</span>
+                        <span class="text-gray-400">Funnel</span>
+                        <select v-model="funnelValue" @change="setFunnel"
+                            class="text-xs px-1.5 py-0.5 rounded-lg border border-gray-200 bg-white text-gray-800 cursor-pointer focus:outline-none focus:border-green-500"
+                            :class="{ 'text-gray-400 italic': !funnelValue }">
+                            <option value="" disabled>{{ angle.funnel || 'setzen…' }}</option>
+                            <option value="ToFu">ToFu — Awareness</option>
+                            <option value="MoFu">MoFu — Consideration</option>
+                            <option value="BoFu">BoFu — Decision</option>
+                        </select>
+                    </span>
                 </div>
             </div>
 
@@ -713,49 +780,112 @@ onMounted(recommendStatement);
             </div>
 
             <!-- Produzieren Sidebar (25%) -->
-            <div class="neu-card p-4 h-fit">
-                <h3 class="text-sm font-semibold text-gray-800 mb-3">🚀 Produzieren</h3>
+            <div class="neu-card p-4 h-fit space-y-4">
+
+                <!-- Header mit Funnel-Kontext des Angles -->
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-gray-800">🚀 Produzieren</h3>
+                    <span v-if="angleFunnel" class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                        :class="angleFunnel === 'ToFu' ? 'bg-blue-50 text-blue-700' : angleFunnel === 'MoFu' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'"
+                        :title="funnelTooltips[angleFunnel.toLowerCase()] || ''">
+                        {{ angleFunnel }}
+                    </span>
+                </div>
+                <p v-if="angleFunnel" class="text-[10px] text-gray-400 -mt-2 leading-snug">
+                    {{ funnelTooltips[angleFunnel.toLowerCase()] }}
+                </p>
 
                 <!-- Post-Typ -->
-                <label class="text-[10px] text-gray-400 uppercase font-medium">Post-Typ</label>
-                <select v-model="activeFormat" @change="selectFormat(activeFormat)" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
-                    <option v-for="fmt in availableFormats" :key="fmt" :value="fmt">{{ formatLabels[fmt] || fmt }}</option>
-                </select>
-                <p class="text-[11px] text-gray-400 mb-3">{{ formatDesc[activeFormat] }}</p>
+                <div>
+                    <div class="flex items-center gap-1 mb-1">
+                        <label class="text-[10px] text-gray-400 uppercase font-medium">Post-Format</label>
+                        <span class="text-[10px] text-gray-300 cursor-help" :title="'Welchen Kanal willst du bespielen? Jedes Format hat eigene Regeln und Strukturen. Hover über die Auswahl für Details.'">ⓘ</span>
+                    </div>
+                    <select v-model="activeFormat" @change="selectFormat(activeFormat)"
+                        class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
+                        <option v-for="fmt in availableFormats" :key="fmt" :value="fmt">{{ formatIcons[fmt] || '' }} {{ formatLabels[fmt] || fmt }}</option>
+                    </select>
+                    <p class="text-[11px] text-gray-400 leading-snug">{{ formatTooltips[activeFormat] }}</p>
+                </div>
+
+                <!-- Stil / Persona -->
+                <div v-if="(personas || []).length">
+                    <div class="flex items-center gap-1 mb-1">
+                        <label class="text-[10px] text-gray-400 uppercase font-medium">Stil (Persona)</label>
+                        <span class="text-[10px] text-gray-300 cursor-help" title="Wer schreibt den Post? Die Persona steuert Ton, Perspektive (ich-wir), Verbotswörter und Referenz-Beispiele.">ⓘ</span>
+                    </div>
+                    <select v-model="selectedPersona" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
+                        <option v-for="p in personas" :key="p.id" :value="p.id">{{ p.name }}{{ p.is_default ? ' ★' : '' }}</option>
+                    </select>
+                    <p class="text-[11px] text-gray-400 truncate" :title="(personas || []).find(p => p.id == selectedPersona)?.role">
+                        {{ (personas || []).find(p => p.id == selectedPersona)?.role || '' }}
+                    </p>
+                </div>
 
                 <!-- Statement-Typ -->
-                <label class="text-[10px] text-gray-400 uppercase font-medium">Statement-Typ <span class="text-indigo-500">(auto)</span></label>
-                <select v-model="statementType" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
-                    <option v-for="o in statementOptions" :key="o" :value="o">{{ o }}</option>
-                </select>
-                <p v-if="statementReason" class="text-[11px] text-gray-500 mb-3">💡 {{ statementReason }}</p>
-
-                <!-- Templates -->
-                <label class="text-[10px] text-gray-400 uppercase font-medium mb-1">Template(s)</label>
-                <div class="space-y-1 max-h-40 overflow-y-auto mb-3">
-                    <div v-for="tpl in filteredTemplates" :key="tpl.name" @click="toggleTemplate(tpl)"
-                        class="flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs"
-                        :class="isSelected(tpl.name) ? 'bg-green-50 border-green-300' : 'bg-white border-gray-200 hover:border-gray-300'">
-                        <span :class="isSelected(tpl.name) ? 'text-green-600' : 'text-gray-300'">{{ isSelected(tpl.name) ? '✓' : '○' }}</span>
-                        <span class="text-gray-800 truncate" :title="tpl.description">{{ tpl.name }}</span>
+                <div>
+                    <div class="flex items-center gap-1 mb-1">
+                        <label class="text-[10px] text-gray-400 uppercase font-medium">Statement-Typ</label>
+                        <span class="text-[10px] text-indigo-400 font-medium">auto</span>
+                        <span class="text-[10px] text-gray-300 cursor-help" title="Wie wird die These framed? 'Direkt' = sachlich, 'Drastisch' = alarmierende Konsequenz, 'Gain' = positiver Outcome, 'Mechanismus' = Wie-genau-Erklärung. Wird automatisch empfohlen, aber du kannst überschreiben.">ⓘ</span>
                     </div>
-                    <p v-if="!filteredTemplates.length" class="text-[11px] text-gray-400 italic py-1">Keine Templates.</p>
+                    <select v-model="statementType" class="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 mb-1 focus:outline-none focus:border-green-500">
+                        <option v-for="o in statementOptions" :key="o" :value="o">{{ o }}</option>
+                    </select>
+                    <p v-if="statementReason" class="text-[11px] text-gray-500 leading-snug">💡 {{ statementReason }}</p>
                 </div>
 
-                <p v-if="generateError" class="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">⚠️ {{ generateError }}</p>
-                <div v-if="generating" class="mb-2">
-                    <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
-                        <span>{{ generatingHint }}</span>
-                        <span class="font-mono tabular-nums">{{ elapsed }}s</span>
+                <!-- Templates mit Funnel-Priorisierung -->
+                <div>
+                    <div class="flex items-center gap-1 mb-1.5">
+                        <label class="text-[10px] text-gray-400 uppercase font-medium">Post-Template(s)</label>
+                        <span class="text-[10px] text-gray-300 cursor-help" title="Das Template bestimmt die Struktur des Posts. Mehrere Templates = mehrere A/B-Varianten in einem Klick. Templates mit Stern passen zur Funnel-Stufe dieses Angles.">ⓘ</span>
+                        <span v-if="angleFunnel" class="text-[10px] text-gray-400 ml-auto">★ = passt zu {{ angleFunnel }}</span>
                     </div>
-                    <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div class="h-full bg-green-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: progressWidth }"></div>
+                    <div class="space-y-1 max-h-52 overflow-y-auto">
+                        <div v-for="tpl in filteredTemplates" :key="tpl.name" @click="toggleTemplate(tpl)"
+                            class="flex items-start gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs transition-colors"
+                            :class="isSelected(tpl.name) ? 'bg-green-50 border-green-300' : 'bg-white border-gray-200 hover:border-gray-300'">
+                            <span class="mt-0.5 shrink-0" :class="isSelected(tpl.name) ? 'text-green-600' : 'text-gray-300'">{{ isSelected(tpl.name) ? '✓' : '○' }}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-1">
+                                    <span class="text-gray-800 font-medium truncate">{{ tpl.name }}</span>
+                                    <span v-if="funnelMatch(tpl)" class="text-amber-500 text-[10px] shrink-0" :title="'Empfohlen für ' + angleFunnel">★</span>
+                                </div>
+                                <p class="text-[10px] text-gray-400 leading-snug mt-0.5">{{ tpl.description }}</p>
+                            </div>
+                        </div>
+                        <p v-if="!filteredTemplates.length" class="text-[11px] text-gray-400 italic py-1">Keine Templates. → <a href="/templates" class="underline text-green-600">Katalog öffnen</a></p>
                     </div>
+
+                    <!-- Mehrfach-Auswahl-Erklärung -->
+                    <p v-if="selectedTemplates.length > 1" class="text-[10px] text-indigo-600 mt-1.5 leading-snug">
+                        {{ selectedTemplates.length }} Templates gewählt → {{ selectedTemplates.length }} Varianten werden generiert. Gut für A/B-Tests.
+                    </p>
+                    <p v-else-if="selectedTemplates.length === 0" class="text-[10px] text-gray-400 mt-1.5 leading-snug">
+                        Tipp: Mehrere Templates gleichzeitig wählen = mehrere Varianten in einem Klick.
+                    </p>
                 </div>
-                <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
-                    class="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium disabled:opacity-50">
-                    {{ generating ? 'Generiere… ' + elapsed + 's' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
-                </button>
+
+                <!-- Generieren-Button + Fortschritt -->
+                <div>
+                    <p v-if="generateError" class="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 mb-2">⚠️ {{ generateError }}</p>
+                    <div v-if="generating" class="mb-2">
+                        <div class="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+                            <span>{{ generatingHint }}</span>
+                            <span class="font-mono tabular-nums">{{ elapsed }}s</span>
+                        </div>
+                        <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-green-500 rounded-full transition-all duration-1000 ease-linear" :style="{ width: progressWidth }"></div>
+                        </div>
+                    </div>
+                    <button @click="generateVariants" :disabled="generating || !selectedTemplates.length"
+                        class="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-colors">
+                        {{ generating ? 'Generiere… ' + elapsed + 's' : (selectedTemplates.length > 1 ? '🚀 ' + selectedTemplates.length + ' Varianten generieren' : '🚀 Post generieren') }}
+                    </button>
+                    <p v-if="!selectedTemplates.length" class="text-[10px] text-gray-400 text-center mt-1">Erst ein Template wählen</p>
+                </div>
+
             </div>
         </div>
 

@@ -3,7 +3,7 @@ import { ref, computed, reactive } from 'vue';
 import { router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
-const props = defineProps({ strategies: Array, currentStrategy: Object, items: Array, kpis: Object, learningReport: Object });
+const props = defineProps({ strategies: Array, currentStrategy: Object, items: Array, kpis: Object, learningReport: Object, strategyKeywords: Array });
 
 const previewFormat = ref('all');
 const selectedItem = ref(null);
@@ -384,8 +384,8 @@ function seoScore(item) {
             <div>
               <h4 class="text-sm font-semibold text-gray-900 mb-2">Keyword-Vorschläge</h4>
               <div class="flex flex-wrap gap-2">
-                <span v-for="kw in (selectedItem.persona?.content_attributes?.keywords || []).slice(0, 8)" :key="kw" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">{{ kw }}</span>
-                <span v-if="!(selectedItem.persona?.content_attributes?.keywords || []).length" class="text-xs text-gray-500">Keine Keywords in Persona definiert</span>
+                <span v-for="kw in (strategyKeywords || []).slice(0, 8)" :key="kw" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">{{ kw }}</span>
+                <span v-if="!(strategyKeywords || []).length" class="text-xs text-gray-500">Keine Keywords in der Strategie definiert</span>
               </div>
             </div>
           </div>

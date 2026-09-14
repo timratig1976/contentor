@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ContentStrategy;
+use App\Models\PostTemplate;
 use App\Models\Strategy;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,20 +17,18 @@ class TemplatesPageController extends Controller
         $strategy = Strategy::where('key', $strategyKey)->firstOrFail();
         $strategies = Strategy::all();
 
-        $contentStrategies = ContentStrategy::where('strategy_id', $strategy->id)->get()->keyBy('key');
+        $templates = PostTemplate::orderBy('format')->orderBy('name')->get();
 
-        $keys = collect(ContentStrategy::KEYS)->map(fn ($key) => [
-            'key' => $key,
-            'label' => ContentStrategy::LABELS[$key] ?? $key,
-            'content' => $contentStrategies->get($key)?->content,
-            'version' => $contentStrategies->get($key)?->version ?? 0,
-            'updated_at' => $contentStrategies->get($key)?->updated_at,
-        ]);
+        $cs = ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'post_templates')->first();
+        $selected = $cs?->content['selected'] ?? $templates->pluck('id')->all();
 
         return Inertia::render('Templates/Index', [
             'strategies' => $strategies,
             'currentStrategy' => $strategy,
-            'contentKeys' => $keys,
+            'templates' => $templates,
+            'selected' => $selected,
+            'formats' => PostTemplate::FORMATS,
         ]);
     }
 }

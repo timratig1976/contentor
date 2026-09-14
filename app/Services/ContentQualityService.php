@@ -41,15 +41,15 @@ class ContentQualityService
     /**
      * Stufe 1: deterministische Regel-Checks.
      *
-     * @return array{violations:array<int,string>, missing_cta:bool, too_short:bool, too_long:bool}
+     * @return array{violations:array<int,string>, missing_cta:bool, too_short:bool, too_long:bool, wall_of_text:bool}
      */
     public function ruleCheck(string $content, string $format, Strategy $strategy, array $strategyCtx): array
     {
         $violations = $this->rulesService->checkToneViolations($content, $strategy, $strategyCtx);
         $missingCta = ! $this->rulesService->checkMandatoryCta($content, $strategy);
 
-        // Wortzahl gegen Kanal-Regeln prüfen (konfiguriert oder Defaults)
-        $channelRules = $strategyCtx['channel_rules'][$format] ?? $this->defaultWordCount($format);
+        // Wortzahl gegen zentrale Kanal-Regeln prüfen (ContentRulesService, inkl. DB-Overrides)
+        $channelRules = $this->rulesService->channelRules($format, $strategyCtx['channel_rules'] ?? []);
         $words = str_word_count(strip_tags($content));
         $min = $channelRules['word_count']['min'] ?? null;
         $max = $channelRules['word_count']['max'] ?? null;
@@ -59,26 +59,48 @@ class ContentQualityService
             'missing_cta' => $missingCta,
             'too_short' => $min !== null && $words < $min,
             'too_long' => $max !== null && $words > (int) round($max * 1.35), // 35% Toleranz
+            'wall_of_text' => $this->isWallOfText($content, $words, $format),
         ];
+    }
+
+    /**
+     * Erkennt Fließtext-Wände: zu wenige Absätze (Leerzeilen) für die Textlänge.
+     * Faustregel: ab ~60 Wörtern sollte mind. 1 Absatzumbruch pro ~70 Wörter da sein.
+     * blog_post hat längere Absätze — hier reicht 1 pro ~100 Wörter.
+     */
+    private function isWallOfText(string $content, int $words, string $format): bool
+    {
+        if ($words < 60) {
+            return false; // kurze Texte brauchen keine Absatztrennung
+        }
+
+        $paragraphs = preg_split('/\n\s*\n/', trim($content));
+        $paragraphCount = count(array_filter($paragraphs, fn ($p) => trim($p) !== ''));
+
+        $wordsPerParagraphLimit = $format === 'blog_post' ? 100 : 70;
+        $expectedMinParagraphs = max(2, (int) ceil($words / $wordsPerParagraphLimit));
+
+        return $paragraphCount < $expectedMinParagraphs;
     }
 
     /**
      * Ist irgendein Regel-Fund kritisch (erfordert Auto-Fix)?
      *
-     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool} $check
+     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool,wall_of_text:bool} $check
      */
     public function hasBlockingFindings(array $check): bool
     {
         return $check['violations'] !== []
             || $check['missing_cta']
             || $check['too_short']
-            || $check['too_long'];
+            || $check['too_long']
+            || ($check['wall_of_text'] ?? false);
     }
 
     /**
      * Stufe 2: konkrete Korrektur-Anweisung aus den Regel-Funden ableiten.
      *
-     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool} $check
+     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool,wall_of_text:bool} $check
      */
     public function fixInstruction(array $check, Strategy $strategy): string
     {
@@ -99,6 +121,9 @@ class ContentQualityService
         }
         if ($check['too_long']) {
             $parts[] = 'Der Text ist deutlich zu lang für das Format — kürze auf das Wesentliche, streiche Wiederholungen und Füllsätze.';
+        }
+        if ($check['wall_of_text'] ?? false) {
+            $parts[] = 'Der Text wirkt als eine zusammenhängende Textwand — teile ihn in mehr Absätze auf (Leerzeile zwischen Sinnabschnitten: Hook, Kontext, Mechanismus, Konsequenz, CTA jeweils eigener Absatz). Inhalt dabei unverändert lassen.';
         }
 
         return implode("\n", $parts);
@@ -146,9 +171,13 @@ class ContentQualityService
 
         $system = 'Du bist ein strenger, aber fairer Content-Reviewer für B2B-Content. '
             . 'Bewerte den Text nach: Hook-Stärke, Klarheit des Mechanismus, Belegqualität, '
-            . 'Zielgruppen-Treffer, Markenkonformität und CTA-Wirksamkeit. '
+            . 'Zielgruppen-Treffer, Markenkonformität, CTA-Wirksamkeit UND Menschlichkeit '
+            . '(klingt der Text wie von einem echten Menschen geschrieben, oder erkennt man typische KI-Rhetorik '
+            . 'wie "Das klingt nach X. Es ist Y.", perfekte 3er-Aufzählungen, isolierte Merksatz-Pointen, '
+            . 'übermäßig glatte/symmetrische Sätze)? '
+            . 'Ziehe für schwache Menschlichkeit klar Punkte ab, auch wenn der Rest stark ist. '
             . 'Antworte AUSSCHLIESSLICH mit validem JSON in genau diesem Schema: '
-            . '{"score": <Ganzzahl 0-10>, "comment": "<2-3 Sätze: was stark ist, was konkret fehlt>", "issues": ["<Mangel 1>", ...]}';
+            . '{"score": <Ganzzahl 0-10>, "comment": "<2-3 Sätze: was stark ist, was konkret fehlt>", "issues": ["<Mangel 1>", ...], "ai_sound_detected": <true/false>}';
 
         $user = "FORMAT: {$format}\n"
             . ($icp ? "ZIELGRUPPE (ICP): {$icp}\n" : '')
@@ -184,7 +213,11 @@ class ContentQualityService
             $comment = trim($comment . ' Mängel: ' . implode('; ', array_slice($data['issues'], 0, 4)));
         }
 
-        return ['score' => $score, 'comment' => mb_substr($comment, 0, 1000) ?: null];
+        return [
+            'score' => $score,
+            'comment' => mb_substr($comment, 0, 1000) ?: null,
+            'ai_sound_detected' => (bool) ($data['ai_sound_detected'] ?? false),
+        ];
     }
 
     /**
@@ -214,6 +247,7 @@ class ContentQualityService
             $flags['missing_cta'] = $check['missing_cta'];
             $flags['too_short'] = $check['too_short'];
             $flags['too_long'] = $check['too_long'];
+            $flags['wall_of_text'] = $check['wall_of_text'] ?? false;
 
             $findings = $this->findingsList($check);
             $flags['steps'][] = [
@@ -262,8 +296,39 @@ class ContentQualityService
             'stage' => 'score',
             'score' => $review['score'],
             'comment' => $review['comment'],
+            'ai_sound_detected' => $review['ai_sound_detected'] ?? false,
             'at' => now()->toIso8601String(),
         ];
+
+        // ── Nachbesserung, wenn das Review-Modell KI-Sound erkannt hat ──
+        // (regelbasierter Loop oben deckt nur bekannte Muster ab; das
+        // Review-Modell erkennt auch subtilere Fälle wie glatte Symmetrie).
+        if (($review['ai_sound_detected'] ?? false) === true) {
+            $humanizeInstruction = 'Der Text klingt zu sehr wie von einer KI geschrieben (zu glatt, zu symmetrisch, '
+                . 'klischeehafte Rhetorik). Überarbeite ihn so, dass er wie ein echter Mensch klingt: '
+                . 'variiere Satzlängen unregelmäßig, vermeide perfekte Aufzählungen und Antithese-Formeln, '
+                . 'lass Gedanken auch mal unrund enden. Inhalt und Kernaussage bleiben unverändert.';
+
+            $humanized = $this->applyFix($content, $humanizeInstruction, $item->format);
+            $flags['steps'][] = [
+                'stage' => 'humanize',
+                'result' => $humanized === null ? 'llm_error' : 'ok',
+                'at' => now()->toIso8601String(),
+            ];
+
+            if ($humanized !== null) {
+                $content = $this->rulesService->enforceTone($humanized, $item->format, $strategy, $strategyCtx);
+                // Finalen Text erneut bewerten, damit quality_score den echten Endstand zeigt
+                $review = $this->score($content, $item->format, $strategy, $strategyCtx, $item->icp);
+                $flags['steps'][] = [
+                    'stage' => 'score',
+                    'score' => $review['score'],
+                    'comment' => $review['comment'],
+                    'ai_sound_detected' => $review['ai_sound_detected'] ?? false,
+                    'at' => now()->toIso8601String(),
+                ];
+            }
+        }
 
         $item->content = $content;
         $item->quality_score = $review['score'];
@@ -277,7 +342,7 @@ class ContentQualityService
     /**
      * Befunde als lesbare Liste (leer = alles in Ordnung).
      *
-     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool} $check
+     * @param array{violations:array,missing_cta:bool,too_short:bool,too_long:bool,wall_of_text:bool} $check
      * @return array<int,string>
      */
     private function findingsList(array $check): array
@@ -288,22 +353,8 @@ class ContentQualityService
                 $check['missing_cta'] ? 'Pflicht-CTA fehlt' : null,
                 $check['too_short'] ? 'Text zu kurz fürs Format' : null,
                 $check['too_long'] ? 'Text zu lang fürs Format' : null,
+                ($check['wall_of_text'] ?? false) ? 'Text ist eine Fließtext-Wand (zu wenige Absätze)' : null,
             ])
         ));
-    }
-
-    /**
-     * Default-Wortzahlregeln pro Format (Spiegel der ContentController-Defaults,
-     * reduziert auf die word_count-Dimension).
-     */
-    private function defaultWordCount(string $format): array
-    {
-        return match ($format) {
-            'linkedin_post' => ['word_count' => ['min' => 120, 'max' => 220]],
-            'newsletter_acquisition' => ['word_count' => ['min' => 200, 'max' => 400]],
-            'newsletter_bk' => ['word_count' => ['min' => 150, 'max' => 350]],
-            'blog_post' => ['word_count' => ['min' => 400, 'max' => 800]],
-            default => [],
-        };
     }
 }

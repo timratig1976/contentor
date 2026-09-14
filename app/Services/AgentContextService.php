@@ -69,6 +69,20 @@ class AgentContextService
             $sections[] = implode("\n", $toneLines);
         }
 
+        // ── Content-Keywords & Themenfokus (Strategie-Ebene) ──
+        $contentStrategy = ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'content_strategy')->first()?->content;
+        $kwLines = ['### Content-Schwerpunkte'];
+        if (!empty($contentStrategy['keywords'])) {
+            $kwLines[] = '- Kern-Keywords: ' . implode(', ', (array) $contentStrategy['keywords']);
+        }
+        if (!empty($contentStrategy['topic_focus'])) {
+            $kwLines[] = '- Themenfokus: ' . implode(', ', (array) $contentStrategy['topic_focus']);
+        }
+        if (count($kwLines) > 1) {
+            $sections[] = implode("\n", $kwLines);
+        }
+
         // ── Brand Voice aus ContentStrategy ─────────────────
         $brandVoice = ContentStrategy::where('strategy_id', $strategy->id)
             ->where('key', 'brand_voice')->first()?->content;
@@ -134,17 +148,11 @@ class AgentContextService
             $pos = is_array($p->positioning) ? $this->flatten($p->positioning) : $p->positioning;
             $lines[] = "- Positionierung: {$pos}";
         }
-        if (!empty($p->content_attributes)) {
-            $lines[] = '- Content-Attribute: ' . $this->flatten($p->content_attributes);
-        }
         if (!empty($p->perspective)) {
             $lines[] = "- Perspektive: {$p->perspective}";
         }
         if (!empty($p->emoji_usage)) {
             $lines[] = "- Emoji-Nutzung: {$p->emoji_usage}";
-        }
-        if (!empty($p->max_sentence_length)) {
-            $lines[] = "- Max. Satzlänge: {$p->max_sentence_length} Wörter";
         }
         if (!empty($p->forbidden_words)) {
             $lines[] = "- Verbotene Wörter: " . implode(', ', (array) $p->forbidden_words);

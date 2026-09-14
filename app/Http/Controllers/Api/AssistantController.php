@@ -112,9 +112,7 @@ class AssistantController extends Controller
             'tonality' => $data['tonality'] ?? ['style' => 'direkt'],
             'topics' => $data['topics'] ?? [],
             'angles' => $data['angles'] ?? [],
-            'content_attributes' => $data['content_attributes'] ?? [],
             'cadence' => $data['cadence'] ?? 'weekly',
-            'channel_strategies' => $data['channel_strategies'] ?? [],
             'active' => $data['active'] ?? true,
         ]);
 
@@ -322,8 +320,7 @@ Beispiel für ICP-Erstellung:
     "voice": "...",
     "tonality": { "style": "direkt", "do": [], "dont": [] },
     "topics": [],
-    "angles": [],
-    "content_attributes": {}
+    "angles": []
   }
 }
 PROMPT;

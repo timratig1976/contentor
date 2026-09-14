@@ -63,6 +63,14 @@ Route::get('/strategy/{unit}/{key}', [StrategyController::class, 'show']);
 Route::get('/strategy/{unit}', [StrategyController::class, 'index']);
 Route::delete('/strategy/{unit}/{key}', [StrategyController::class, 'destroy']);
 
+// Post-Template-Katalog (global, strategie-übergreifend)
+Route::get('/post-templates', [\App\Http\Controllers\Api\PostTemplateController::class, 'index']);
+Route::post('/post-templates', [\App\Http\Controllers\Api\PostTemplateController::class, 'store']);
+Route::patch('/post-templates/{postTemplate}', [\App\Http\Controllers\Api\PostTemplateController::class, 'update']);
+Route::delete('/post-templates/{postTemplate}', [\App\Http\Controllers\Api\PostTemplateController::class, 'destroy']);
+Route::post('/post-templates/selection', [\App\Http\Controllers\Api\PostTemplateController::class, 'updateSelection']);
+Route::post('/post-templates/identify', [\App\Http\Controllers\Api\PostTemplateController::class, 'identify']);
+
 // Medien
 Route::post('/media/briefing', [MediaController::class, 'storeBriefing']);
 Route::post('/media/generieren', [MediaController::class, 'generieren']);
