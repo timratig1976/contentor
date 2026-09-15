@@ -143,6 +143,117 @@ class LlmService
     }
 
     /**
+     * Führt einen Chat-Completion-Call mit Tool/Function-Calling aus.
+     * Identisch zu chat(), aber mit zusätzlichem 'tools'-Parameter im Request-Body
+     * und dem vollen Response-Raw (inkl. tool_calls) für den Orchestrator.
+     *
+     * @param array<int,array{role:string,content:string}> $messages
+     * @param array<int,array{type:string,function:array}> $tools
+     * @param array{max_tokens?:int,temperature?:int|float,reasoning_effort?:string,timeout?:int,agent_log?:string} $overrides
+     * @return array{text:?string, usage:array, cost:?float, status:string, error:?string, raw:array}
+     */
+    public function chatWithTools(string $agent, string $systemPrompt, array $messages, array $tools, array $overrides = []): array
+    {
+        $cfg = $this->configFor($agent);
+
+        $provider = $overrides['provider'] ?? $cfg['provider'];
+        $model = $this->withProviderPrefix($overrides['model'] ?? $cfg['model'], $provider);
+        $temperature = (float) ($overrides['temperature'] ?? $cfg['temperature']);
+        $maxTokens = (int) ($overrides['max_tokens'] ?? $cfg['max_tokens']);
+        $effort = strtolower((string) ($overrides['reasoning_effort'] ?? $cfg['reasoning_effort']));
+        $timeout = (int) ($overrides['timeout'] ?? 180);
+
+        $key = Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
+        if (! $key) {
+            return $this->fail('EdenAI-Key nicht konfiguriert (Einstellungen).', $agent, $provider, $model, $messages, $overrides);
+        }
+
+        $fullMessages = [];
+        if ($systemPrompt !== '') {
+            $fullMessages[] = ['role' => 'system', 'content' => $systemPrompt];
+        }
+        foreach ($messages as $m) {
+            $fullMessages[] = $m;
+        }
+
+        $body = [
+            'model' => $model,
+            'messages' => $fullMessages,
+            'temperature' => $temperature,
+            'max_tokens' => $maxTokens,
+            'tools' => $tools,
+            'tool_choice' => 'auto',
+        ];
+
+        $this->applyReasoning($body, $provider, $model, $effort);
+
+        $start = microtime(true);
+        $logAgent = $overrides['agent_log'] ?? $agent;
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $key,
+                'Content-Type' => 'application/json',
+            ])->timeout($timeout)->post(self::ENDPOINT, $body);
+
+            $data = $response->json() ?? [];
+            $duration = (int) ((microtime(true) - $start) * 1000);
+
+            if ($response->failed()) {
+                $err = $data['error']['message'] ?? $data['error'] ?? $data['message'] ?? $response->body();
+                $errStr = is_string($err) ? $err : json_encode($err);
+                $this->log($logAgent, $provider, $model, $messages, 'HTTP ' . $response->status() . ': ' . $errStr, 'error', null, $duration);
+                return [
+                    'text' => null, 'usage' => [], 'cost' => null,
+                    'status' => 'error', 'error' => $errStr, 'raw' => $data,
+                ];
+            }
+
+            $usage = $data['usage'] ?? [];
+            $cost = $data['cost'] ?? null;
+            $choice = $data['choices'][0] ?? [];
+            $message = $choice['message'] ?? [];
+            $text = $message['content'] ?? null;
+            $toolCalls = $message['tool_calls'] ?? [];
+            $finishReason = $choice['finish_reason'] ?? '';
+
+            $outputForLog = $text ?? json_encode($toolCalls);
+            $this->log($logAgent, $provider, $model, $messages, (string) $outputForLog, 'success', $usage['total_tokens'] ?? null, $duration);
+
+            // Tool calls present → no text needed, orchestrator will continue the loop
+            if (! empty($toolCalls)) {
+                return [
+                    'text' => $text ? trim($text) : null,
+                    'usage' => $usage, 'cost' => $cost,
+                    'status' => 'success', 'error' => null, 'raw' => $data,
+                ];
+            }
+
+            if (! $text) {
+                $reason = $data['error']['message'] ?? $data['message'] ?? null;
+                return [
+                    'text' => null, 'usage' => $usage, 'cost' => $cost,
+                    'status' => 'error',
+                    'error' => 'EdenAI lieferte keine Antwort' . ($reason ? ': ' . (is_string($reason) ? $reason : json_encode($reason)) : ''),
+                    'raw' => $data,
+                ];
+            }
+
+            return [
+                'text' => trim($text), 'usage' => $usage, 'cost' => $cost,
+                'status' => 'success', 'error' => null, 'raw' => $data,
+            ];
+        } catch (\Throwable $e) {
+            $duration = (int) ((microtime(true) - $start) * 1000);
+            $this->log($logAgent, $provider, $model, $messages, 'Exception: ' . $e->getMessage(), 'error', null, $duration);
+            return [
+                'text' => null, 'usage' => [], 'cost' => null,
+                'status' => 'error', 'error' => $e->getMessage(), 'raw' => [],
+            ];
+        }
+    }
+
+    /**
      * Fügt den passenden Reasoning-Parameter zum Request-Body hinzu.
      * Wird nur gesetzt, wenn das jeweilige Modell/Provider das unterstützt.
      *
