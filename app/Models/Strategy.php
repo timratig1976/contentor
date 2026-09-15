@@ -146,6 +146,29 @@ class Strategy extends Model
         return $this->rules['hashtags'] ?? [];
     }
 
+    /**
+     * Sprache der generierten Inhalte dieser Strategie (Angles, Posts).
+     * config['language'] = 'de' | 'en' | ... — Default 'de'.
+     */
+    public function getLanguageAttribute(): string
+    {
+        return $this->config['language'] ?? 'de';
+    }
+
+    /**
+     * Menschenlesbarer Sprachname für Prompts.
+     */
+    public function getLanguageNameAttribute(): string
+    {
+        return match (strtolower($this->language)) {
+            'de', 'deutsch', 'german' => 'Deutsch',
+            'en', 'english', 'englisch' => 'English',
+            'fr', 'french' => 'Français',
+            'es', 'spanish' => 'Español',
+            default => $this->language,
+        };
+    }
+
     public function getForbiddenPatternsAttribute(): array
     {
         return $this->rules['forbiddenPatterns'] ?? [];

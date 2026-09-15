@@ -425,6 +425,9 @@ class ContentRulesService
         '/\b(kein[e]?\s+[\wäöüß-]+(?:\s+[\wäöüß-]+){0,3},\s*kein[e]?\s+[\wäöüß-]+(?:\s+[\wäöüß-]+){0,3},\s*kein[e]?\s+[\wäöüß-]+)/i' => 'perfekte 3er-Aufzählung mit "kein/keine"',
         '/\b(weder\s+[\wäöüß-]+\s+noch\s+[\wäöüß-]+\s+noch\s+[\wäöüß-]+)/i' => 'perfekte 3er-Aufzählung mit "weder/noch"',
         '/^(das ergebnis|die konsequenz|fazit|die lösung)\s*:\s*$/im' => 'Einzeiler-Übergang als eigene Zeile (z.B. "Fazit:")',
+        // Satzbau-Regel: enumerative Prosa ("X in einem Tool, Y in einem anderen, Z im Kopf")
+        '/\bin einem [^,.!?]{2,40},\s*[^,.!?]{3,40} in einem anderen/i' => 'Aufzählung als Satzersatz ("X in einem Tool, Y in einem anderen") — zu einem Fließsatz verweben',
+        '/:\s*[^.!?\n]{3,60},\s*[^.!?\n]{3,60},\s*(und|oder)\s+[^.!?\n]{3,60}$/m' => 'Satz endet mit Doppelpunkt + Liste — zu einem Fließsatz verweben',
     ];
 
     /**

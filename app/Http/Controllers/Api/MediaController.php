@@ -48,7 +48,8 @@ class MediaController extends Controller
             'title' => 'nullable|string|max:255',
             'concept' => 'nullable|string|max:1000',
             'style' => 'nullable|string|max:255',
-            'aspect_ratio' => 'nullable|string|max:20',
+            'visual_type' => 'nullable|string|in:image,graphic,schema',
+            'aspect_ratio' => 'nullable|string|in:1:1,1.91:1,16:9,4:5,9:16',
             'position' => 'nullable|integer|min:0',
         ]);
 
@@ -58,7 +59,8 @@ class MediaController extends Controller
             'title' => $validated['title'] ?? null,
             'concept' => $validated['concept'] ?? null,
             'style' => $validated['style'] ?? null,
-            'aspect_ratio' => $validated['aspect_ratio'] ?? null,
+            'visual_type' => $validated['visual_type'] ?? 'image',
+            'aspect_ratio' => $validated['aspect_ratio'] ?? '1:1',
             'position' => $validated['position'] ?? 0,
         ]);
 

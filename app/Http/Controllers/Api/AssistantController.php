@@ -18,6 +18,7 @@ class AssistantController extends Controller
         $validated = $request->validate([
             'message' => 'required|string',
             'history' => 'nullable|array',
+            'strategy' => 'nullable|string',
         ]);
 
         $edenaiKey = Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
@@ -26,6 +27,16 @@ class AssistantController extends Controller
         }
 
         $systemPrompt = $this->buildSystemPrompt();
+
+        // Strategie-Kontext injizieren: explizit übergeben ODER aktive Strategie
+        // aus der Session (AppLayout-Strategy-Switcher) ODER erste Strategie.
+        $strategyKey = $validated['strategy']
+            ?? $request->session()->get('current_strategy')
+            ?? \App\Models\Strategy::orderBy('id')->value('key');
+        if ($strategyKey) {
+            $ctx = app(\App\Services\AgentContextService::class)->build($strategyKey);
+            $systemPrompt .= "\n\n---\n## AKTUELLER STRATEGIE-KONTEXT (immer berücksichtigen)\n" . $ctx;
+        }
 
         $messages = $validated['history'] ?? [];
         $messages[] = ['role' => 'user', 'message' => $validated['message']];
@@ -174,7 +185,14 @@ class AssistantController extends Controller
 
         $byKey = collect($existingIcps)->keyBy('key')->toArray();
         foreach ($newIcps as $icp) {
-            $byKey[$icp['key']] = $icp;
+            $key = $icp['key'] ?? null;
+            if (! $key) {
+                continue;
+            }
+            // Feld-weise mergen: neue Werte überschreiben, nicht gesendete Felder
+            // des bestehenden ICP bleiben erhalten (verhindert Datenverlust bei
+            // Teil-Updates, z. B. nur voice_statements ergänzen).
+            $byKey[$key] = array_merge($byKey[$key] ?? [], $icp);
         }
         $mergedIcps = array_values($byKey);
 
@@ -304,11 +322,19 @@ Beispiel für ICP-Erstellung:
         "gains": ["Planbares Wachstum", "Echte Forecast-Sicherheit"],
         "match_keywords": "forecast|pipeline|sales",
         "default_funnel": "ToFu",
-        "priority": "high"
+        "priority": "high",
+        "statement_types": ["Direkt", "Drastisch", "Sarkastisch"],
+        "messaging_core": "Strategische Grundhaltung, die jeder Text transportieren soll",
+        "buying_triggers": ["Lizenz-Verlängerung steht an", "Top-Vertriebler kündigt"],
+        "voice_statements": ["Echtes Kundenzitat 1", "Echtes Kundenzitat 2"],
+        "objections": [{ "objection": "Einwand", "rebuttal": "Entgegnung" }],
+        "buyer_personas": [{ "name": "Thomas Brauer", "role": "GF", "focus": "Was ihn treibt" }]
       }
     ]
   }
 }
+
+WICHTIG für ICP-Updates: Du kannst einen bestehenden ICP (per key) auch TEILWEISE aktualisieren — sende nur die Felder, die du ändern/ergänzen willst. Nicht gesendete Felder bleiben erhalten. Die AI-Generierungs-Felder (voice_statements, messaging_core, buying_triggers, statement_types, objections, buyer_personas) machen Angles/Posts kundennah — fülle sie, wenn der Nutzer ICP-Material (Zitate, Pains, Einwände) liefert.
 
 ## JSON-Format für Persona (global, separat von der Strategie):
 {

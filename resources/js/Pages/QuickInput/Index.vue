@@ -57,16 +57,15 @@ function setDrafts(list) {
 function selectAll(v) { drafts.value.forEach(d => d.selected = v); }
 const selectedCount = () => drafts.value.filter(d => d.selected).length;
 
-// ─── Enhance via Assistant ───
-async function enhanceWithAssistant(idx) {
+// ─── An Assistant senden: Angle-Verbesserung im Assistant-Chat ausführen ───
+function enhanceWithAssistant(idx) {
     const draft = drafts.value[idx];
-    const prompt = `Verbessere diesen Content-Angle: "${draft.angle}".\nMache ihn schärfer und präziser (max 200 Zeichen), ICP: ${draft.icp || 'unbekannt'}.\nAntworte NUR mit dem verbesserten Angle-Text.`;
-    try {
-        await navigator.clipboard.writeText(prompt);
-        draft.copied = true;
-        setTimeout(() => draft.copied = false, 2500);
-    } catch {}
-    document.dispatchEvent(new CustomEvent('assistant:open', { detail: { prompt } }));
+    const strategyKey = result.value?.source?.strategy?.key || pdfForm.strategy || form.strategy || urlForm.strategy;
+    const prompt = `Verbessere diesen Content-Angle im Kontext der Strategie "${strategyKey}": "${draft.angle}".\nMache ihn schärfer und präziser (max 200 Zeichen), ICP: ${draft.icp || 'unbekannt'}${draft.pain_cluster ? ', Pain-Cluster: ' + draft.pain_cluster : ''}.\nAntworte NUR mit dem verbesserten Angle-Text.`;
+    // Assistant öffnen, Strategie-Kontext setzen und Prompt direkt senden
+    document.dispatchEvent(new CustomEvent('assistant:open', {
+        detail: { prompt, strategy: strategyKey, autoSend: true },
+    }));
 }
 
 // ─── Approve: selektierte Drafts in die angles-Tabelle ───
@@ -460,8 +459,8 @@ const typeIcons = { blog: '📝', linkedin: '💼', url: '🔗', pdf: '📄', no
                   <span v-if="draft.statement_type" class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">{{ draft.statement_type }}</span>
                 </div>
               </div>
-              <button @click="enhanceWithAssistant(idx)" class="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 whitespace-nowrap" :title="'Über Assistant verbessern'">
-                {{ draft.copied ? '✓ Prompt kopiert' : '🤖 Verbessern' }}
+              <button @click="enhanceWithAssistant(idx)" class="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 whitespace-nowrap" title="Angle im Assistant-Chat im Kontext der Strategie verbessern lassen">
+                🤖 An Assistant senden
               </button>
             </div>
           </div>

@@ -250,7 +250,7 @@ async function saveAutoApprove() {
 }
 function removeItem(key, field, index) { forms[key][field].splice(index, 1); }
 function addChannel() { forms.channel_rules.channels.push({ channel: 'linkedin', frequency: 'weekly', best_times: [], rules: [] }); }
-function addIcp() { forms.icp_definitions.icps.push({ key: '', name: '', description: '', role: '', pain_points: [], gains: [], match_keywords: '', default_funnel: 'ToFu', priority: 'medium' }); }
+function addIcp() { forms.icp_definitions.icps.push({ key: '', name: '', description: '', role: '', pain_points: [], gains: [], match_keywords: '', default_funnel: 'ToFu', priority: 'medium', statement_types: [], messaging_core: '', buying_triggers: [], voice_statements: [], objections: [], buyer_personas: [] }); }
 function removeIcp(index) {
     const icp = forms.icp_definitions.icps[index];
     if (!icp) return;
@@ -784,6 +784,66 @@ onMounted(loadIcpFromConfig);
               </div>
             </div>
             <button @click="icp.gains = [...(icp.gains || []), '']" class="text-xs text-green-600 font-medium">+ Gain</button>
+          </div>
+        </div>
+
+        <!-- AI-Generierung: Kunden-Stimme & Kontext (steuert Angle-/Content-Generierung) -->
+        <div class="border border-violet-200 bg-violet-50/40 rounded-xl p-4 space-y-4">
+          <p class="text-xs font-semibold text-violet-800">🤖 AI-Generierung — Kunden-Stimme & Kontext <span class="font-normal text-violet-500">(macht Angles/Posts kundennah; leer = generisch)</span></p>
+
+          <div>
+            <label class="block text-xs text-gray-900 mb-1 font-medium">Messaging-Frame (strategische Grundhaltung)</label>
+            <textarea v-model="icp.messaging_core" rows="2" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. Kein Neustart — eine Neuausrichtung. Adoption ist ein Prozess-Problem, kein Tool-Problem."></textarea>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-gray-700 mb-1 font-medium">🗣 So spricht der ICP (echte Zitate, Stil-Referenz)</label>
+              <div class="space-y-1.5 mb-1.5">
+                <div v-for="(v, vi) in (icp.voice_statements || [])" :key="vi" class="flex gap-2">
+                  <input v-model="icp.voice_statements[vi]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. HubSpot ist unser Friedhof — Deals gehen rein, nichts kommt raus." />
+                  <button @click="icp.voice_statements.splice(vi, 1)" class="text-red-500">✕</button>
+                </div>
+              </div>
+              <button @click="icp.voice_statements = [...(icp.voice_statements || []), '']" class="text-xs text-green-600 font-medium">+ Zitat</button>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-700 mb-1 font-medium">⚡ Kauf-Trigger (Auslöser / Timing)</label>
+              <div class="space-y-1.5 mb-1.5">
+                <div v-for="(t, ti) in (icp.buying_triggers || [])" :key="ti" class="flex gap-2">
+                  <input v-model="icp.buying_triggers[ti]" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="z.B. Lizenz-Verlängerung steht an" />
+                  <button @click="icp.buying_triggers.splice(ti, 1)" class="text-red-500">✕</button>
+                </div>
+              </div>
+              <button @click="icp.buying_triggers = [...(icp.buying_triggers || []), '']" class="text-xs text-green-600 font-medium">+ Trigger</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-gray-700 mb-1 font-medium">🎭 Bevorzugte Statement-Typen</label>
+              <div class="flex flex-wrap gap-1.5">
+                <button v-for="st in ['Direkt','Drastisch','Bedrohlich','Gain','Mechanismus','Vision','Sarkastisch','Humorvoll']" :key="st"
+                  @click="icp.statement_types = (icp.statement_types || []).includes(st) ? icp.statement_types.filter(x => x !== st) : [...(icp.statement_types || []), st]"
+                  class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+                  :class="(icp.statement_types || []).includes(st) ? 'bg-violet-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:border-violet-400'">
+                  {{ st }}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-700 mb-1 font-medium">🛡 Einwände & Entgegnungen <span class="text-gray-400 font-normal">(Objection → Rebuttal, eine pro Zeile, getrennt mit „=>")</span></label>
+              <textarea :value="(icp.objections || []).map(o => (o.objection || '') + ' => ' + (o.rebuttal || '')).join('\n')"
+                @input="icp.objections = $event.target.value.split('\n').filter(l => l.trim()).map(l => { const p = l.split('=>'); return { objection: (p[0]||'').trim(), rebuttal: (p[1]||'').trim() }; })"
+                rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono" placeholder="Wir haben das schon selbst probiert => Setup ist nicht das Problem — Prozess-Einbettung ist es."></textarea>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-gray-700 mb-1 font-medium">👥 Buyer-Centre (Entscheider) <span class="text-gray-400 font-normal">(Name | Rolle | Fokus — eine pro Zeile)</span></label>
+            <textarea :value="(icp.buyer_personas || []).map(p => [p.name, p.role, p.focus].filter(Boolean).join(' | ')).join('\n')"
+              @input="icp.buyer_personas = $event.target.value.split('\n').filter(l => l.trim()).map(l => { const p = l.split('|').map(x => x.trim()); return { name: p[0]||'', role: p[1]||'', focus: p[2]||'' }; })"
+              rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono" placeholder="Thomas Brauer | GF | Will es reparieren, hat aber Angst nochmal Geld zu verbrennen."></textarea>
           </div>
         </div>
 

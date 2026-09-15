@@ -291,10 +291,10 @@ function seoScore(item) {
           <button @click="detailTab='kpi'" class="flex-1 px-4 py-2 text-sm font-medium" :class="detailTab==='kpi'?'text-green-600 border-b-2 border-green-600':'text-gray-500'">📈 KPI (nach Publishing)</button>
         </div>
 
-        <!-- Preview Mode -->
+        <!-- Preview Mode: nur die zum Format passende Vorschau zeigen -->
         <div v-if="detailTab==='preview'" class="p-5">
           <!-- LinkedIn -->
-          <div v-if="selectedItem.preview?.linkedin" class="mb-6">
+          <div v-if="selectedItem.format === 'linkedin_post' && selectedItem.preview?.linkedin" class="mb-6">
             <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">LinkedIn Preview</h4>
             <div class="bg-white border border-gray-200 rounded-xl p-4">
               <div class="flex items-center gap-3 mb-3">
@@ -312,7 +312,7 @@ function seoScore(item) {
           </div>
 
           <!-- Ad -->
-          <div v-if="selectedItem.preview?.ad" class="mb-6">
+          <div v-if="selectedItem.format === 'ad_copy' && selectedItem.preview?.ad" class="mb-6">
             <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">Ad Preview</h4>
             <div class="bg-white border border-gray-200 rounded-xl p-4">
               <div class="bg-gray-100 rounded-lg h-40 mb-3 flex items-center justify-center text-gray-400 text-sm">Ad Image</div>
@@ -323,7 +323,7 @@ function seoScore(item) {
           </div>
 
           <!-- Newsletter -->
-          <div v-if="selectedItem.preview?.newsletter" class="mb-6">
+          <div v-if="selectedItem.format?.startsWith('newsletter') && selectedItem.preview?.newsletter" class="mb-6">
             <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">Newsletter Preview</h4>
             <div class="bg-white border border-gray-200 rounded-xl p-4">
               <p class="text-sm font-semibold text-gray-900 mb-1">{{ selectedItem.preview.newsletter.subject }}</p>
@@ -333,12 +333,20 @@ function seoScore(item) {
           </div>
 
           <!-- Blog -->
-          <div v-if="selectedItem.preview?.blog">
+          <div v-if="selectedItem.format === 'blog_post' && selectedItem.preview?.blog">
             <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">Blog Preview</h4>
             <div class="bg-white border border-gray-200 rounded-xl p-4">
               <h4 class="text-lg font-semibold text-gray-900 mb-2">{{ selectedItem.preview.blog.title }}</h4>
               <p class="text-sm text-gray-600 mb-3">{{ selectedItem.preview.blog.excerpt }}...</p>
               <div class="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{{ selectedItem.preview.blog.body }}</div>
+            </div>
+          </div>
+
+          <!-- Landing Page / Fallback: Roh-Text, wenn keine spezifische Vorschau passt -->
+          <div v-if="!['linkedin_post','ad_copy','blog_post'].includes(selectedItem.format) && !selectedItem.format?.startsWith('newsletter')">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase mb-3">{{ fmtLabels[selectedItem.format] || selectedItem.format }} Preview</h4>
+            <div class="bg-white border border-gray-200 rounded-xl p-4">
+              <div class="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{{ selectedItem.content }}</div>
             </div>
           </div>
         </div>

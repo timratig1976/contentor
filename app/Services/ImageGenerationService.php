@@ -87,7 +87,19 @@ class ImageGenerationService
         // Stil-Anreicherung: Marken-Stil anhängen, falls im Prompt noch nicht genannt
         $strategy = $item->strategy;
         $styleBlock = $this->styleDirective($strategy);
-        $fullPrompt = "Generate an image. Prompt: {$prompt}\n\nMandatory style: {$styleBlock}\nNo text overlay, no words, no letters in the image.";
+
+        // Visual-Typ (Bild / Grafik / Schema) als klare Prompt-Direktive
+        $visualType = $meta['visual_type'] ?? 'image';
+        $typeBlock = $this->typeDirective($visualType);
+
+        // Ziel-Seitenverhältnis (wird nach der Generierung per Crop/Pad erzwungen,
+        // da das Modell nur quadratisch liefert)
+        $aspectRatio = $meta['aspect_ratio'] ?? '1:1';
+
+        $fullPrompt = "Generate an image. Type: {$typeBlock}\nPrompt: {$prompt}\n\nMandatory style: {$styleBlock}\n"
+            . ($visualType === 'schema'
+                ? 'Diagram/flowchart style: clean shapes, arrows and short labels ARE allowed and encouraged here.'
+                : 'No text overlay, no words, no letters in the image.');
 
         $start = microtime(true);
         try {
@@ -116,11 +128,14 @@ class ImageGenerationService
 
             $this->logImageCall('success', 'image generated (' . strlen($dataUrl) . ' chars base64)', $duration, $response->json('cost'));
 
-            // Base64 → lokale Datei (public disk)
+            // Base64 → Binärdaten
             $binary = base64_decode(substr($dataUrl, strpos($dataUrl, ',') + 1), true);
             if ($binary === false) {
                 return ['media' => null, 'error' => 'Base64-Decodierung fehlgeschlagen.'];
             }
+
+            // Auf Ziel-Seitenverhältnis zuschneiden (zentrierter Crop), falls nicht quadratisch
+            $binary = $this->cropToAspectRatio($binary, $aspectRatio);
 
             $filename = 'media/' . strtolower($item->id) . '-' . now()->format('Ymd-His') . '.png';
             Storage::disk('public')->put($filename, $binary);
@@ -128,15 +143,18 @@ class ImageGenerationService
             $media = ContentMedia::create([
                 'content_item_id' => $item->id,
                 'strategy_id' => $item->strategy_id,
-                'type' => 'image',
+                // DB-CHECK erlaubt image|video|graphic|carousel_slide|ad_creative.
+                // 'schema' wird als 'graphic' gespeichert (Original-Typ bleibt im briefing).
+                'type' => $visualType === 'image' ? 'image' : 'graphic',
                 'url' => Storage::disk('public')->url($filename),
-                'format' => $meta['aspect_ratio'] ?? '1.91:1',
+                'format' => $aspectRatio,
                 'status' => 'generiert',
                 'briefing' => [
                     'prompt_hint' => $prompt,
                     'idea_title' => $meta['title'] ?? null,
                     'idea_concept' => $meta['concept'] ?? null,
                     'style' => $meta['style'] ?? null,
+                    'visual_type' => $visualType,
                     'model' => self::IMAGE_MODEL,
                     'generated_at' => now()->toIso8601String(),
                 ],
@@ -148,6 +166,64 @@ class ImageGenerationService
             $this->logImageCall('error', 'Exception: ' . $e->getMessage(), (int) ((microtime(true) - $start) * 1000), null);
             return ['media' => null, 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Prompt-Direktive pro Visual-Typ (Bild / Grafik / Schema).
+     */
+    private function typeDirective(string $visualType): string
+    {
+        return match ($visualType) {
+            'graphic' => 'Flat vector-style graphic / illustration. Bold simple shapes, brand colors, minimal detail, no photo-realism.',
+            'schema'  => 'Explanatory diagram / flowchart / schema. Clean geometric shapes connected by arrows, minimal background.',
+            default   => 'Photorealistic or stylized hero image.',
+        };
+    }
+
+    /**
+     * Schneidet das (quadratische) Bild zentriert auf das Ziel-Seitenverhältnis zu.
+     * Nutzt GD. Gibt die Original-Binärdaten zurück, wenn GD fehlt oder Ratio 1:1.
+     */
+    private function cropToAspectRatio(string $binary, string $aspectRatio): string
+    {
+        if (! preg_match('/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/', trim($aspectRatio), $m)) {
+            return $binary;
+        }
+        $target = (float) $m[1] / (float) $m[2];
+        if (abs($target - 1.0) < 0.01 || ! function_exists('imagecreatefromstring')) {
+            return $binary; // quadratisch oder GD nicht verfügbar → Original
+        }
+
+        $src = @imagecreatefromstring($binary);
+        if (! $src) {
+            return $binary;
+        }
+        $w = imagesx($src);
+        $h = imagesy($src);
+        $current = $w / $h;
+
+        if ($current > $target) {
+            // zu breit → seitlich beschneiden
+            $newW = (int) round($h * $target);
+            $newH = $h;
+            $srcX = (int) round(($w - $newW) / 2);
+            $srcY = 0;
+        } else {
+            // zu hoch → oben/unten beschneiden
+            $newW = $w;
+            $newH = (int) round($w / $target);
+            $srcX = 0;
+            $srcY = (int) round(($h - $newH) / 2);
+        }
+
+        $dst = imagecreatetruecolor($newW, $newH);
+        imagecopyresampled($dst, $src, 0, 0, $srcX, $srcY, $newW, $newH, $newW, $newH);
+
+        ob_start();
+        imagepng($dst);
+        $out = ob_get_clean();
+
+        return $out !== false ? $out : $binary;
     }
 
     /**

@@ -395,6 +395,14 @@ const imageIdeasLoading = ref(false);
 const imageGenLoading = ref(false);
 const imageGenError = ref('');
 const imageGenElapsed = ref(0);
+const visualType = ref('image');      // image | graphic | schema
+const aspectRatio = ref('1:1');       // 1:1 | 1.91:1 | 16:9 | 4:5 | 9:16 | 4:3
+const visualTypes = [
+    { key: 'image', label: '🖼️ Bild', hint: 'Foto / Hero-Image' },
+    { key: 'graphic', label: '✏️ Grafik', hint: 'Flat-Illustration, Brand-Farben' },
+    { key: 'schema', label: '📊 Schema', hint: 'Diagramm / Flowchart mit Labels' },
+];
+const aspectRatios = ['1:1', '1.91:1', '16:9', '4:5', '9:16'];
 let imageTimer = null;
 const generatedImages = ref([]); // { id, url, title }
 const selectedIdea = ref(null);
@@ -429,6 +437,8 @@ async function generateFromIdea(idea) {
                 prompt: idea.prompt,
                 title: idea.title,
                 concept: idea.concept,
+                visual_type: visualType.value,
+                aspect_ratio: aspectRatio.value,
             }),
         });
         const data = await res.json().catch(() => null);
@@ -701,11 +711,29 @@ onMounted(recommendStatement);
                         <!-- Bild-Pipeline: Ideen → Auswahl → Generieren -->
                         <div class="mt-4 border-t border-gray-100 pt-3">
                             <div class="flex items-center justify-between mb-2">
-                                <p class="text-xs text-gray-500 font-medium">🎨 Passendes Bild <span class="text-gray-400 font-normal">— Ideen aus dem finalen Text, du wählst</span></p>
+                                <p class="text-xs text-gray-500 font-medium">🎨 Passendes Visual <span class="text-gray-400 font-normal">— Ideen aus dem finalen Text, du wählst Typ & Format</span></p>
                                 <button @click="requestImageIdeas" :disabled="imageIdeasLoading || imageGenLoading"
                                     class="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 disabled:opacity-50 transition-colors">
                                     {{ imageIdeasLoading ? 'Ideen kommen…' : (imageIdeas.length ? '↻ Neue Ideen' : '💡 Bildideen entwickeln') }}
                                 </button>
+                            </div>
+
+                            <!-- Visual-Typ + Seitenverhältnis -->
+                            <div class="flex flex-wrap items-center gap-3 mb-3">
+                                <div class="flex gap-1">
+                                    <button v-for="vt in visualTypes" :key="vt.key" @click="visualType = vt.key"
+                                        :title="vt.hint"
+                                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors"
+                                        :class="visualType === vt.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+                                        {{ vt.label }}
+                                    </button>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <label class="text-[11px] text-gray-500">Format:</label>
+                                    <select v-model="aspectRatio" class="bg-white border border-gray-300 rounded-lg px-2 py-1 text-[11px] text-gray-900">
+                                        <option v-for="r in aspectRatios" :key="r" :value="r">{{ r }}</option>
+                                    </select>
+                                </div>
                             </div>
 
                             <!-- Bereits generierte Bilder -->

@@ -403,14 +403,16 @@ class QuickInputController extends Controller
 
         foreach ($result['angles'] as $item) {
             $icp = $item['icp'] ?: $this->rulesService->guessIcp($item['angle'], null, $strategy);
+
+            // Cluster: dem LLM-Urteil vertrauen. Es setzt pain_cluster NUR, wenn
+            // der Angle eindeutig passt — sonst bewusst leer. Kein erzwungener
+            // Regex-/Default-Fallback, der unpassende Cluster zuweisen würde
+            // (z. B. "pay per use" → fälschlich "Blindflug im Forecast").
             $cluster = null;
-            if ($item['pain_cluster']) {
+            if (! empty($item['pain_cluster'])) {
                 foreach ($strategy->clusters as $c) {
                     if ($c['code'] === $item['pain_cluster']) { $cluster = $c; break; }
                 }
-            }
-            if (! $cluster) {
-                $cluster = $this->rulesService->pickPainCluster($item['angle'], $strategy);
             }
             $painCluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
             $statementType = $item['statement_type'] ?: $this->rulesService->pickStatementType(null, null, $item['angle']);

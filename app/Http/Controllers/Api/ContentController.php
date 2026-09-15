@@ -590,6 +590,12 @@ class ContentController extends Controller
         $lines[] = "ANGLE (Kernaussage): {$angle->angle}";
         if ($angle->icp) {
             $lines[] = "ICP: {$angle->icp}";
+            // Reichhaltiger ICP-Kontext: Kunden-Stimme, Messaging-Frame, Trigger,
+            // Statement-Typ-Gewichtung, Objections — macht den Text kundennah statt generisch.
+            $icpBlock = app(\App\Services\IcpContextService::class)->block($strategy, $angle->icp);
+            if ($icpBlock !== '') {
+                $lines[] = $icpBlock;
+            }
         }
         if ($angle->pain_cluster) {
             $lines[] = "Pain-Cluster: {$angle->pain_cluster}";
@@ -877,6 +883,21 @@ class ContentController extends Controller
         $lines[] = "- Ein isolierter Merksatz/Aphorismus als eigene Zeile am Absatzende (\"Das Wissen sitzt im Kopf.\"-Stil)";
         $lines[] = "- Rhetorische Frage-Antwort-Muster (\"Warum ist das so? Weil...\")";
         $lines[] = "- Übergänge wie \"Das Ergebnis:\", \"Die Konsequenz:\", \"Fazit:\" als Einzeiler vor einer Aussage";
+
+        // ═══ SATZBAU-REGEL (Fluss statt Aneinanderreihung) ═══
+        $lines[] = "";
+        $lines[] = "## SATZBAU (zwingend)";
+        $lines[] = "VERBOTEN:";
+        $lines[] = "- Aufzählungen als Satzersatz (\"Angebote in einem Tool, Kontakte in einem anderen, Umsatz im ERP\") — das ist eine Liste in Prosa-Form";
+        $lines[] = "- Abgehackte Kurzsätze, aneinandergereiht ohne Verbindung";
+        $lines[] = "- Sätze, die mit Doppelpunkt + Liste enden";
+        $lines[] = "- Gedankenstrich als Pointen-Trick am Satzende (max 1x im ganzen Post)";
+        $lines[] = "PFLICHT:";
+        $lines[] = "- Ein Gedanke fließt über Konjunktionen (und, nur, aber, während, wodurch, sodass) in den nächsten — nicht durch Aneinanderreihung";
+        $lines[] = "- Aufzählungen zu EINEM Satz verweben, der auch laut vorgelesen funktioniert — Testfrage: \"Würde das so jemand am Tisch erzählen?\"";
+        $lines[] = "- Jeder Satz muss inhaltlich anschlussfähig sein: er sagt, WAS als Nächstes passiert, nicht nur DASS etwas fehlt";
+        $lines[] = "- Abstrakte Aussagen (\"nie zusammengeführt\") sofort konkretisieren: wozu hätte es gedient, was fehlte dadurch konkret";
+        $lines[] = "- JEDER Struktur-Block (Hook, Problem, Kosten, Lösung, Frage) wird als 2-4 zusammenhängende Sätze geschrieben — nicht als Stichpunkt-Kette";
         $lines[] = $this->randomHumanTic();
 
         return implode("\n", $lines);

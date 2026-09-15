@@ -1,13 +1,21 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { usePage } from '@inertiajs/vue3';
 
 const props = defineProps({ settings: Object });
 
 const STORAGE_KEY = 'contentor_assistant_messages';
 
+const page = usePage();
 const isOpen = ref(false);
 const loading = ref(false);
 const input = ref('');
+
+// Aktive Strategie (aus Inertia shared props; kann per assistant:open überschrieben werden)
+const currentStrategy = ref(null);
+function getActiveStrategy() {
+    return currentStrategy.value || page.props.activeCampaign || page.props.strategies?.[0]?.key || null;
+}
 
 // Messages aus localStorage laden, Fallback auf Begrüßung
 function loadMessages() {
@@ -41,8 +49,14 @@ onUnmounted(() => {
 function onAssistantOpen(e) {
     isOpen.value = true;
     const prompt = e.detail?.prompt;
+    const strategy = e.detail?.strategy;
+    if (strategy) currentStrategy.value = strategy;
     if (prompt) {
         input.value = prompt;
+        // Auto-Send, wenn ausdrücklich gewünscht (z. B. Quick Input "An Assistant senden")
+        if (e.detail?.autoSend) {
+            nextTick(() => sendMessage());
+        }
     }
     scrollToBottom();
 }
@@ -80,7 +94,7 @@ async function sendMessage() {
         const res = await fetch('/api/assistant/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
-            body: JSON.stringify({ message: msg, history: messages.value.map(m => ({ role: m.role, message: m.text })) }),
+            body: JSON.stringify({ message: msg, history: messages.value.map(m => ({ role: m.role, message: m.text })), strategy: currentStrategy.value || getActiveStrategy() }),
         });
         const data = await res.json();
         const reply = data.reply || 'Keine Antwort erhalten.';

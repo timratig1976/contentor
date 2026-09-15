@@ -25,6 +25,10 @@ class QuickInputAgentService
     /**
      * Analysiert Content via LLM und extrahiert Angles.
      *
+     * Nutzt den konfigurierbaren "angle"-Agenten (Einstellungen → agent_models),
+     * z. B. anthropic/claude-sonnet-4-6 — NICHT mehr hartcodiert gpt-4o.
+     * Die Angles werden in der Sprache der Strategie generiert (config.language).
+     *
      * @return array{angles: array, error: ?string}
      */
     public function extractAngles(string $content, Strategy $strategy, int $maxAngles = 5): array
@@ -43,6 +47,22 @@ class QuickInputAgentService
         }
         $forbidden = implode(', ', $rules['forbiddenPatterns'] ?? []);
 
+        // Zielsprache aus der Strategie (Default Deutsch)
+        $langName = $strategy->language_name ?? 'Deutsch';
+
+        // Reichhaltige ICP-Kontexte (Kunden-Stimme, Messaging-Frame, Statement-Typen)
+        // damit extrahierte Angles kundennah klingen und die richtige Tonalität treffen.
+        $icpContext = '';
+        $icpSvc = app(\App\Services\IcpContextService::class);
+        foreach ($icpSvc->all($strategy) as $icp) {
+            if (! empty($icp['key'])) {
+                $block = $icpSvc->block($strategy, $icp['key']);
+                if ($block !== '') {
+                    $icpContext .= $block . "\n\n";
+                }
+            }
+        }
+
         $systemPrompt = "Du bist ein Content-Analyst. Extrahiere aus dem folgenden Text die {$maxAngles} stärksten Content-Angles (Thesen/Aussagen, die sich als LinkedIn-Post eignen).
 
 REGELN:
@@ -51,8 +71,10 @@ REGELN:
 - Nur die inhaltliche Kernaussage — kein Fluff
 - Wenn der Text weniger als {$maxAngles} starke Angles enthält, gib nur die gefundenen zurück
 
+SPRACHE: Formuliere ALLE Angles auf {$langName} — auch wenn der Quelltext in einer anderen Sprache ist. Übersetze frei und idiomatisch, nicht wörtlich.
+
 Format: valides JSON-Array, jedes Objekt hat:
-  - \"angle\": string (die Kernaussage, max 200 Zeichen)
+  - \"angle\": string (die Kernaussage auf {$langName}, max 200 Zeichen)
   - \"icp\": string (NUR wenn der Angle eindeutig zu einem ICP passt, sonst \"\")
   - \"pain_cluster\": string (NUR wenn der Angle eindeutig zu einem Cluster passt, sonst \"\")
   - \"statement_type\": string (einer von: Direkt, Drastisch, Bedrohlich, Gain, Mechanismus, Vision)
@@ -62,71 +84,60 @@ VERFÜGBARE PAIN-CLUSTER:
 {$clusterList}
 VERBOTENE BEGRIFFE (vermeiden): {$forbidden}
 
+" . ($icpContext !== '' ? "ICP-KONTEXT (Kunden-Stimme, Messaging-Frames, bevorzugte Statement-Typen — damit Angles kundennah klingen und die richtige Tonalität treffen):\n{$icpContext}" : '') . "
+
 Wichtig: icp und pain_cluster NUR setzen wenn der Angle-INHALT eindeutig dazu passt. Keine Defaults, kein Raten. Lieber leer lassen.
 Antworte NUR mit dem JSON-Array, keine Erklärungen.";
 
-        $userPrompt = "Extrahiere Angles aus diesem Text:\n\n---\n{$content}\n---";
+        $userPrompt = "Extrahiere Angles aus diesem Text (Angles auf {$langName}):\n\n---\n{$content}\n---";
 
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $key,
-                'Content-Type' => 'application/json',
-            ])->timeout(self::TIMEOUT)->post(self::ENDPOINT, [
-                'model' => self::MODEL,
-                'messages' => [
-                    ['role' => 'system', 'content' => $systemPrompt],
-                    ['role' => 'user', 'content' => $userPrompt],
-                ],
-                'temperature' => 0.3,
-                'max_tokens' => 1500,
-            ]);
+        // Konfigurierbarer "angle"-Agent via LlmService (Modell in Einstellungen wählbar)
+        $result = app(\App\Services\LlmService::class)->chat('angle', $systemPrompt, [
+            ['role' => 'user', 'content' => $userPrompt],
+        ], ['timeout' => self::TIMEOUT, 'temperature' => 0.3, 'max_tokens' => 1500]);
 
-            $text = $response->json('choices.0.message.content');
-            if (!$text) {
-                return ['angles' => [], 'error' => 'Leere LLM-Antwort.'];
-            }
-
-            // JSON aus der Antwort parsen (Markdown-Codeblock-Fallback)
-            $text = trim($text);
-            if (preg_match('/```(?:json)?\s*([\s\S]*?)```/', $text, $m)) {
-                $text = trim($m[1]);
-            }
-
-            $parsed = json_decode($text, true);
-            if (!is_array($parsed)) {
-                return ['angles' => [], 'error' => 'LLM-Antwort nicht als JSON parsebar: ' . mb_substr($text, 0, 200)];
-            }
-
-            // Normalisieren: falls kein Array von Objekten, sondern ein Objekt mit "angles"-Key
-            if (isset($parsed['angles'])) {
-                $parsed = $parsed['angles'];
-            }
-
-            // Validieren und auf maxAngles begrenzen
-            $angles = [];
-            foreach (array_slice($parsed, 0, $maxAngles) as $item) {
-                if (is_string($item)) {
-                    $angles[] = [
-                        'angle' => mb_substr(trim($item), 0, 200),
-                        'icp' => '',
-                        'pain_cluster' => '',
-                        'statement_type' => '',
-                    ];
-                } elseif (is_array($item) && !empty($item['angle'])) {
-                    $angles[] = [
-                        'angle' => mb_substr(trim($item['angle']), 0, 200),
-                        'icp' => $item['icp'] ?? '',
-                        'pain_cluster' => $item['pain_cluster'] ?? '',
-                        'statement_type' => $item['statement_type'] ?? '',
-                    ];
-                }
-            }
-
-            return ['angles' => $angles, 'error' => null];
-        } catch (\Throwable $e) {
-            Log::error('QuickInputAgentService::extractAngles() fehlgeschlagen: ' . $e->getMessage());
-            return ['angles' => [], 'error' => 'LLM-Fehler: ' . $e->getMessage()];
+        if ($result['status'] !== 'success' || ! $result['text']) {
+            return ['angles' => [], 'error' => $result['error'] ?? 'Leere LLM-Antwort.'];
         }
+
+        $text = trim($result['text']);
+
+        // JSON aus der Antwort parsen (Markdown-Codeblock-Fallback)
+        if (preg_match('/```(?:json)?\s*([\s\S]*?)```/', $text, $m)) {
+            $text = trim($m[1]);
+        }
+
+        $parsed = json_decode($text, true);
+        if (!is_array($parsed)) {
+            return ['angles' => [], 'error' => 'LLM-Antwort nicht als JSON parsebar: ' . mb_substr($text, 0, 200)];
+        }
+
+        // Normalisieren: falls kein Array von Objekten, sondern ein Objekt mit "angles"-Key
+        if (isset($parsed['angles'])) {
+            $parsed = $parsed['angles'];
+        }
+
+        // Validieren und auf maxAngles begrenzen
+        $angles = [];
+        foreach (array_slice($parsed, 0, $maxAngles) as $item) {
+            if (is_string($item)) {
+                $angles[] = [
+                    'angle' => mb_substr(trim($item), 0, 200),
+                    'icp' => '',
+                    'pain_cluster' => '',
+                    'statement_type' => '',
+                ];
+            } elseif (is_array($item) && !empty($item['angle'])) {
+                $angles[] = [
+                    'angle' => mb_substr(trim($item['angle']), 0, 200),
+                    'icp' => $item['icp'] ?? '',
+                    'pain_cluster' => $item['pain_cluster'] ?? '',
+                    'statement_type' => $item['statement_type'] ?? '',
+                ];
+            }
+        }
+
+        return ['angles' => $angles, 'error' => null];
     }
 
     /**
