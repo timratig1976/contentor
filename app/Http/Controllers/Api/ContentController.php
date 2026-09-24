@@ -598,7 +598,35 @@ class ContentController extends Controller
             }
         }
         if ($angle->pain_cluster) {
-            $lines[] = "Pain-Cluster: {$angle->pain_cluster}";
+            $lines[] = "Themencluster / Pain-Cluster: {$angle->pain_cluster}";
+            // Spezifische Cluster-Ziele und Tonalität aus der Content-Strategie ermitteln
+            $contentStrat = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+                ->where('key', 'content_strategy')->first()?->content;
+            if (!empty($contentStrat['pillars'])) {
+                foreach ($contentStrat['pillars'] as $pillar) {
+                    if (strcasecmp($pillar['name'] ?? '', $angle->pain_cluster) === 0 || str_contains(strtolower($angle->pain_cluster), strtolower($pillar['name'] ?? ''))) {
+                        if (!empty($pillar['goal'])) {
+                            $lines[] = "Ziel dieses Themenclusters: {$pillar['goal']}";
+                        }
+                        if (!empty($pillar['tone'])) {
+                            $lines[] = "Spezifische Tonalität für dieses Thema: {$pillar['tone']}";
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if ($angle->funnel) {
+            $lines[] = "Customer Journey Stufe (Funnel): {$angle->funnel}";
+            $funnelContext = match (strtoupper($angle->funnel)) {
+                'TOFU' => 'Awareness / Problembewusstsein: Zielgruppe kennt die Lösung noch nicht. Fokus auf Scroll-Stop, Gegenthesen und Aufdecken des Problems. Kein direkter Sales-Pitch.',
+                'MOFU' => 'Consideration / Lösungsmechanismus: Zielgruppe versteht das Problem und sucht nach der Methodik. Fokus auf das "Wie", Denkfehler im Markt und Prozess-Verständnis.',
+                'BOFU' => 'Decision / Kaufentscheidung: Zielgruppe evaluiert konkrete Lösungen. Fokus auf ROI, Einwandbehandlung, Umsetzbarkeit und klare Handlungsaufforderung (CTA).',
+                default => null,
+            };
+            if ($funnelContext) {
+                $lines[] = "Funnel-Dramaturgie: {$funnelContext}";
+            }
         }
         foreach (['metric', 'mechanism', 'proofs', 'cta', 'kpis'] as $k) {
             if (!empty($params[$k])) {

@@ -158,7 +158,6 @@ const tabLabels = {
     media_logic: 'Medien-Logik',
     editorial_rhythm: 'Redaktions-Rhythmus',
     content_strategy: 'Content-Strategie',
-    post_templates: 'Post-Templates',
     content_personas: 'Personas',
     ki_settings: '🤖 KI-Einstellungen',
 };
@@ -319,7 +318,35 @@ async function generateExampleForModal(tpl) {
 
 function addMediaRule() { forms.media_logic.rules.push({ format: 'image', style: '', aspect_ratio: '1:1', notes: '' }); }
 function addEditorialSlot() { forms.editorial_rhythm.slots.push({ day: 'Monday', channel: 'linkedin', format: 'post', persona: '' }); }
-function addPillar() { forms.content_strategy.pillars.push({ name: '', description: '', icp_focus: [] }); }
+
+// Akkordeon-Steuerung für Themencluster (visuelle Ruhe)
+const expandedPillars = reactive({});
+function togglePillar(index) {
+    expandedPillars[index] = !expandedPillars[index];
+}
+function expandAllPillars(flag) {
+    (forms.content_strategy.pillars || []).forEach((_, i) => {
+        expandedPillars[i] = flag;
+    });
+}
+
+function addPillar() {
+    if (!forms.content_strategy.pillars) forms.content_strategy.pillars = [];
+    forms.content_strategy.pillars.push({
+        name: '',
+        goal: '',
+        tone: '',
+        description: '',
+        subtopics: [],
+        icp_focus: [],
+    });
+    // Neu hinzugefügtes Cluster sofort aufklappen
+    expandedPillars[forms.content_strategy.pillars.length - 1] = true;
+}
+function addSubtopic(pillar) {
+    if (!pillar.subtopics) pillar.subtopics = [];
+    pillar.subtopics.push('');
+}
 function addStrategyKeyword() { if (!forms.content_strategy.keywords) forms.content_strategy.keywords = []; forms.content_strategy.keywords.push(''); }
 function addTopicFocus() { if (!forms.content_strategy.topic_focus) forms.content_strategy.topic_focus = []; forms.content_strategy.topic_focus.push(''); }
 
@@ -891,57 +918,145 @@ onMounted(loadIcpFromConfig);
 
     <div v-if="activeTab === 'content_strategy'" class="space-y-5">
       <div class="bg-white border border-gray-200 rounded-xl p-6">
-        <h3 class="text-sm font-semibold text-gray-900 mb-4">Content-Strategie</h3>
-        <div class="mb-4"><label class="block text-sm text-gray-900 mb-1 font-medium">Strategische Ziele</label><textarea v-model="forms.content_strategy.goals" rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors focus:ring-2 focus:ring-2 focus:ring-green-500/20/20 transition-colors" placeholder="Was wollen wir mit Content erreichen?"></textarea></div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
+        <h3 class="text-base font-semibold text-gray-900 mb-1">Content-Strategie & Themencluster</h3>
+        <p class="text-xs text-gray-500 mb-5">Hier definierst du die übergeordneten Themencluster (Pillars), spezifische Ziele, Unterthemen und Zielgruppen für die KI-Angle-Generierung.</p>
+
+        <div class="mb-5">
+          <label class="block text-sm text-gray-900 mb-1 font-medium">Strategische Gesamtziele</label>
+          <textarea v-model="forms.content_strategy.goals" rows="3" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors" placeholder="Was wollen wir mit Content insgesamt erreichen? (z.B. Pipeline-Aufbau im Mittelstand, Thought Leadership)"></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-6">
           <div>
             <label class="block text-sm text-gray-900 mb-1 font-medium">Kern-Keywords</label>
             <div class="flex flex-wrap gap-1.5 mb-1.5">
-              <span v-for="(kw, i) in (forms.content_strategy.keywords || [])" :key="i" class="text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1"><input v-model="forms.content_strategy.keywords[i]" class="bg-transparent outline-none w-24 text-xs text-gray-800" placeholder="Keyword" /><button @click="forms.content_strategy.keywords.splice(i, 1)" class="text-red-500">✕</button></span>
+              <span v-for="(kw, i) in (forms.content_strategy.keywords || [])" :key="i" class="text-xs bg-gray-50 border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1">
+                <input v-model="forms.content_strategy.keywords[i]" class="bg-transparent outline-none w-28 text-xs text-gray-800" placeholder="Keyword" />
+                <button @click="forms.content_strategy.keywords.splice(i, 1)" class="text-red-500 hover:text-red-700">✕</button>
+              </span>
             </div>
-            <button @click="addStrategyKeyword" class="text-sm text-green-600 font-medium">+ Keyword</button>
-            <p class="text-xs text-gray-500 mt-1">Terminologie, die im Content und in den Agent-Prompts verwendet wird.</p>
+            <button @click="addStrategyKeyword" class="text-xs text-green-600 font-medium hover:underline">+ Keyword hinzufügen</button>
+            <p class="text-xs text-gray-400 mt-1">Wichtige Fachterminologie für Prompts und Post-Erstellung.</p>
           </div>
           <div>
-            <label class="block text-sm text-gray-900 mb-1 font-medium">Themenfokus</label>
+            <label class="block text-sm text-gray-900 mb-1 font-medium">Fokus-Themen (High-Level)</label>
             <div class="flex flex-wrap gap-1.5 mb-1.5">
-              <span v-for="(t, i) in (forms.content_strategy.topic_focus || [])" :key="i" class="text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1"><input v-model="forms.content_strategy.topic_focus[i]" class="bg-transparent outline-none w-32 text-xs text-gray-800" placeholder="Thema" /><button @click="forms.content_strategy.topic_focus.splice(i, 1)" class="text-red-500">✕</button></span>
+              <span v-for="(t, i) in (forms.content_strategy.topic_focus || [])" :key="i" class="text-xs bg-gray-50 border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1">
+                <input v-model="forms.content_strategy.topic_focus[i]" class="bg-transparent outline-none w-32 text-xs text-gray-800" placeholder="Thema" />
+                <button @click="forms.content_strategy.topic_focus.splice(i, 1)" class="text-red-500 hover:text-red-700">✕</button>
+              </span>
             </div>
-            <button @click="addTopicFocus" class="text-sm text-green-600 font-medium">+ Thema</button>
-            <p class="text-xs text-gray-500 mt-1">Schwerpunkt-Themen dieser Strategie.</p>
+            <button @click="addTopicFocus" class="text-xs text-green-600 font-medium hover:underline">+ Thema hinzufügen</button>
+            <p class="text-xs text-gray-400 mt-1">Schwerpunkte für den Redaktionsplan.</p>
           </div>
         </div>
-        <div>
-          <div class="flex justify-between mb-2"><label class="text-sm text-gray-700">Content-Pillars</label><button @click="addPillar" class="text-sm text-green-600 font-medium">+ Pillar</button></div>
-          <div class="space-y-3">
-            <div v-for="(pillar, i) in (forms.content_strategy.pillars || [])" :key="i" class="bg-white border border-gray-200 rounded-xl p-5">
-              <div class="flex gap-2 mb-2"><input v-model="pillar.name" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900" placeholder="Pillar-Name" /><button @click="forms.content_strategy.pillars.splice(i, 1)" class="text-red-500">✕</button></div>
-              <textarea v-model="pillar.description" rows="2" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 mb-2" placeholder="Beschreibung"></textarea>
-              <div class="flex flex-wrap gap-2"><label v-for="icp in ['B2B-1', 'B2B-2', 'B2B-3', 'B2B-4']" :key="icp" class="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" :value="icp" v-model="pillar.icp_focus" class="rounded border-gray-300 text-green-600 focus:ring-2 focus:ring-green-500/20" /> {{ icp }}</label></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div v-if="activeTab === 'post_templates'" class="space-y-5">
-      <div class="bg-white border border-gray-200 rounded-xl p-6">
-        <div class="flex items-center justify-between mb-3">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-900">Post-Templates</h3>
-            <p class="text-xs text-gray-500 mt-0.5">Templates werden jetzt zentral unter <strong>📝 Templates</strong> verwaltet und pro Strategie aktiviert.</p>
+        <div class="border-t border-gray-200 pt-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h4 class="text-sm font-semibold text-gray-900">Themencluster (Content-Pillars)</h4>
+              <p class="text-xs text-gray-500">Übersichtliche Kacheln. Klicke auf ein Cluster, um Details und Unterthemen zu bearbeiten.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button v-if="forms.content_strategy.pillars?.length" @click="expandAllPillars(true)" class="text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 bg-white">Alle aufklappen</button>
+              <button v-if="forms.content_strategy.pillars?.length" @click="expandAllPillars(false)" class="text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 bg-white">Alle einklappen</button>
+              <button @click="addPillar" class="neu-btn-primary px-3 py-1.5 text-xs font-medium">+ Neues Cluster</button>
+            </div>
           </div>
-          <a :href="'/templates?strategy=' + (currentStrategy?.key || '')" class="neu-btn-primary px-4 py-2 text-sm">📝 Zum Template-Katalog →</a>
-        </div>
-        <div class="bg-gray-50 border border-gray-100 rounded-lg p-4 text-sm text-gray-600">
-          Im Template-Katalog kannst du:<br>
-          <ul class="mt-2 space-y-1 list-disc list-inside text-xs">
-            <li>Templates nach Format gruppiert ansehen (Collapsible-Listen)</li>
-            <li>Per Klick für diese Strategie aktivieren / deaktivieren</li>
-            <li>Eigene Templates manuell anlegen</li>
-            <li>Ein Template per KI aus einem Beispiel-Post ableiten lassen</li>
-            <li>Detailansicht: Struktur, Anwendungsfälle, KI-Beispiel generieren</li>
-          </ul>
+
+          <div class="space-y-3">
+            <div v-for="(pillar, i) in (forms.content_strategy.pillars || [])" :key="i"
+                 class="bg-white border rounded-xl overflow-hidden transition-all shadow-sm"
+                 :class="expandedPillars[i] ? 'border-green-300 ring-2 ring-green-500/10' : 'border-gray-200 hover:border-gray-300'">
+
+              <!-- Kompakter Header (Eingeklappter Ruhezustand) -->
+              <div @click="togglePillar(i)" class="px-5 py-3.5 flex items-center justify-between cursor-pointer bg-gray-50/60 hover:bg-gray-50 transition-colors select-none">
+                <div class="flex items-center gap-3 min-w-0 flex-1 mr-4">
+                  <span class="w-6 h-6 rounded-md bg-green-100 text-green-700 font-bold text-xs flex items-center justify-center shrink-0">
+                    C{{ i + 1 }}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-sm text-gray-900 truncate">
+                        {{ pillar.name || 'Unbenanntes Themencluster' }}
+                      </span>
+                      <span v-if="pillar.subtopics?.length" class="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium shrink-0">
+                        {{ pillar.subtopics.length }} Unterthemen
+                      </span>
+                      <span v-if="pillar.tone" class="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 truncate max-w-[160px] shrink-0">
+                        {{ pillar.tone }}
+                      </span>
+                    </div>
+                    <p v-if="!expandedPillars[i] && pillar.goal" class="text-xs text-gray-500 truncate mt-0.5">
+                      🎯 {{ pillar.goal }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-xs text-gray-400 font-medium">
+                    {{ expandedPillars[i] ? 'Schließen ▲' : 'Bearbeiten ▼' }}
+                  </span>
+                  <button @click.stop="forms.content_strategy.pillars.splice(i, 1)" class="text-gray-300 hover:text-red-500 text-sm p-1 ml-1" title="Cluster löschen">✕</button>
+                </div>
+              </div>
+
+              <!-- Detaillierter Editier-Bereich (Nur ausgeklappt) -->
+              <div v-if="expandedPillars[i]" class="p-5 border-t border-gray-100 bg-white space-y-4">
+                <div>
+                  <label class="block text-xs font-semibold text-gray-700 mb-1">Name des Themenclusters</label>
+                  <input v-model="pillar.name" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 focus:outline-none focus:border-green-500" placeholder="z.B. Vertriebs-Digitalisierung & CRM" />
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">🎯 Spezifische Zielsetzung</label>
+                    <input v-model="pillar.goal" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-green-500" placeholder="Was soll die Zielgruppe denken/fühlen?" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">🎭 Tonalität & Haltung</label>
+                    <input v-model="pillar.tone" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-green-500" placeholder="z.B. nüchtern, datengestützt, provokant" />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-gray-700 mb-1">Beschreibung / Kernbotschaft</label>
+                  <textarea v-model="pillar.description" rows="2" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-green-500" placeholder="Kurze Beschreibung des Problembereichs..."></textarea>
+                </div>
+
+                <!-- Unterthemen / Subtopics -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="text-xs font-semibold text-gray-800">📌 Konkrete Unterthemen (Subtopics)</label>
+                    <button @click="addSubtopic(pillar)" class="text-xs text-green-600 hover:underline font-medium">+ Unterthema</button>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <span v-for="(sub, subIdx) in (pillar.subtopics || [])" :key="subIdx" class="text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1 rounded flex items-center gap-1.5 shadow-sm">
+                      <input v-model="pillar.subtopics[subIdx]" class="bg-transparent outline-none w-44 text-xs text-gray-800" placeholder="z.B. CRM-Einführung im Mittelstand" />
+                      <button @click="pillar.subtopics.splice(subIdx, 1)" class="text-red-500 hover:text-red-700">✕</button>
+                    </span>
+                    <span v-if="!pillar.subtopics?.length" class="text-xs text-gray-400 italic">Noch keine Unterthemen definiert. Klicke auf "+ Unterthema".</span>
+                  </div>
+                </div>
+
+                <!-- Fokus-ICPs -->
+                <div>
+                  <label class="block text-xs font-semibold text-gray-700 mb-1.5">Relevante ICPs</label>
+                  <div class="flex flex-wrap gap-2">
+                    <label v-for="icp in (forms.icp_definitions?.icps || [{key:'B2B-1',name:'B2B-1'},{key:'B2B-2',name:'B2B-2'}])" :key="icp.key" class="flex items-center gap-1.5 text-xs text-gray-700 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-md cursor-pointer hover:bg-white">
+                      <input type="checkbox" :value="icp.key" v-model="pillar.icp_focus" class="rounded border-gray-300 text-green-600 focus:ring-green-500/20" />
+                      <span class="font-medium text-gray-800">{{ icp.key }}</span>
+                      <span v-if="icp.name" class="text-gray-400 text-[11px]">({{ icp.name }})</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!forms.content_strategy.pillars?.length" class="text-center py-6 text-xs text-gray-400 border border-dashed border-gray-300 rounded-xl bg-gray-50/50">
+              Noch keine Themencluster definiert. Klicke oben auf "+ Neues Cluster".
+            </div>
+          </div>
         </div>
       </div>
     </div>

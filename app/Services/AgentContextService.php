@@ -73,6 +73,9 @@ class AgentContextService
         $contentStrategy = ContentStrategy::where('strategy_id', $strategy->id)
             ->where('key', 'content_strategy')->first()?->content;
         $kwLines = ['### Content-Schwerpunkte'];
+        if (!empty($contentStrategy['goals'])) {
+            $kwLines[] = '- Strategische Ziele: ' . $contentStrategy['goals'];
+        }
         if (!empty($contentStrategy['keywords'])) {
             $kwLines[] = '- Kern-Keywords: ' . implode(', ', (array) $contentStrategy['keywords']);
         }
@@ -83,11 +86,78 @@ class AgentContextService
             $sections[] = implode("\n", $kwLines);
         }
 
+        // ── Themencluster (Pillars mit Zielen, Tonalität & Unterthemen) ──
+        if (!empty($contentStrategy['pillars'])) {
+            $pillarLines = ["### Themencluster (Content Pillars & Subtopics)\nOrdne jeden Angle/Post einem dieser Themencluster und Unterthemen zu:"];
+            foreach ($contentStrategy['pillars'] as $p) {
+                $name = $p['name'] ?? 'Unbenannt';
+                $desc = !empty($p['description']) ? " — {$p['description']}" : '';
+                $pillarLines[] = "#### 🏛️ Cluster: **{$name}**{$desc}";
+                if (!empty($p['goal'])) {
+                    $pillarLines[] = "  - **Ziel des Clusters:** {$p['goal']}";
+                }
+                if (!empty($p['tone'])) {
+                    $pillarLines[] = "  - **Spezifische Tonalität/Haltung:** {$p['tone']}";
+                }
+                if (!empty($p['subtopics']) && is_array($p['subtopics'])) {
+                    $subs = array_filter(array_map('trim', $p['subtopics']));
+                    if (!empty($subs)) {
+                        $pillarLines[] = "  - **Konkrete Unterthemen (Subtopics):** " . implode(', ', $subs);
+                    }
+                }
+                if (!empty($p['icp_focus']) && is_array($p['icp_focus'])) {
+                    $pillarLines[] = "  - **Fokus-ICPs:** " . implode(', ', $p['icp_focus']);
+                }
+            }
+            $sections[] = implode("\n", $pillarLines);
+        }
+
         // ── Brand Voice aus ContentStrategy ─────────────────
         $brandVoice = ContentStrategy::where('strategy_id', $strategy->id)
             ->where('key', 'brand_voice')->first()?->content;
         if ($brandVoice) {
-            $sections[] = "### Brand Voice\n" . $this->flatten($brandVoice);
+            $bvLines = ["### Brand Voice"];
+            if (!empty($brandVoice['personality'])) {
+                $bvLines[] = "- Persönlichkeit: " . $brandVoice['personality'];
+            }
+            if (!empty($brandVoice['tone'])) {
+                $bvLines[] = "- Grundtonalität: " . $brandVoice['tone'];
+            }
+            if (!empty($brandVoice['must'])) {
+                $bvLines[] = "- Pflicht-Elemente (immer beachten): " . implode(', ', (array) $brandVoice['must']);
+            }
+            if (!empty($brandVoice['never'])) {
+                $bvLines[] = "- Verboten / No-Gos: " . implode(', ', (array) $brandVoice['never']);
+            }
+            // "So klingt es — so nicht" Few-Shot-Beispiele
+            if (!empty($brandVoice['examples']) && is_array($brandVoice['examples'])) {
+                $bvLines[] = "\n#### 🎯 Konkrete Sprachbeispiele (So klingt es — so nicht):";
+                foreach ($brandVoice['examples'] as $ex) {
+                    $ctx = !empty($ex['context']) ? "[{$ex['context']}] " : '';
+                    if (!empty($ex['bad'])) {
+                        $bvLines[] = "🚫 NICHT SO: {$ctx}\"{$ex['bad']}\"";
+                    }
+                    if (!empty($ex['good'])) {
+                        $bvLines[] = "✅ SONDERN SO: {$ctx}\"{$ex['good']}\"";
+                    }
+                }
+            }
+            $sections[] = implode("\n", $bvLines);
+        }
+
+        // ── Reichhaltige ICP-Definitionen (Pains, Gains, Triggers, Customer Voice) ──
+        $icpSvc = app(IcpContextService::class);
+        $icpBlocks = [];
+        foreach ($icpSvc->all($strategy) as $icp) {
+            if (!empty($icp['key'])) {
+                $b = $icpSvc->block($strategy, $icp['key']);
+                if ($b !== '') {
+                    $icpBlocks[] = $b;
+                }
+            }
+        }
+        if (!empty($icpBlocks)) {
+            $sections[] = "### Detaillierte ICP-Profile (Kunden-Stimme, Pains, Einwände)\n" . implode("\n\n", $icpBlocks);
         }
 
         // ── Personas ────────────────────────────────────────

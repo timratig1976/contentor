@@ -19,6 +19,7 @@ class AssistantController extends Controller
             'message' => 'required|string',
             'history' => 'nullable|array',
             'strategy' => 'nullable|string',
+            'page_context' => 'nullable|array',
         ]);
 
         $edenaiKey = Setting::where('key', 'llm_keys')->first()?->value['edenai_key'] ?? null;
@@ -27,6 +28,21 @@ class AssistantController extends Controller
         }
 
         $systemPrompt = $this->buildSystemPrompt();
+
+        // Aktuellen Seiten- und UI-Kontext injizieren
+        $pageContext = $validated['page_context'] ?? [];
+        if (!empty($pageContext)) {
+            $path = $pageContext['path'] ?? 'Unbekannt';
+            $pageTitle = $pageContext['title'] ?? 'Dashboard';
+            $details = $pageContext['details'] ?? null;
+
+            $systemPrompt .= "\n\n---\n## AKTUELLER SEITEN-KONTEXT DES NUTZERS\n";
+            $systemPrompt .= "- Aktuelle URL / Route: {$path} ({$pageTitle})\n";
+            if ($details) {
+                $systemPrompt .= "- Seiten-Details / Selektierte Daten:\n" . json_encode($details, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n";
+            }
+            $systemPrompt .= "Passe deine Unterstützung, Empfehlungen und JSON-Schreibaktionen passgenau an diese Seite an.\n";
+        }
 
         // Strategie-Kontext injizieren: explizit übergeben ODER aktive Strategie
         // aus der Session (AppLayout-Strategy-Switcher) ODER erste Strategie.
@@ -52,7 +68,7 @@ class AssistantController extends Controller
         $chatMessages[] = ['role' => 'user', 'content' => $validated['message']];
 
         // v3 Chat Completions über den zentralen LlmService (statt Legacy-v2)
-        $result = $llm->chat('assistant', $systemPrompt, $chatMessages, ['timeout' => 120]);
+        $result = $llm->chat('assistant', $systemPrompt, $chatMessages, ['timeout' => 240]);
 
         if ($result['status'] !== 'success') {
             return response()->json([
@@ -249,6 +265,12 @@ class AssistantController extends Controller
 
     private function buildSystemPrompt(): string
     {
+        // Dynamisch aus DB laden (unter /agents editierbar), mit robustem Fallback
+        $prompts = Setting::where('key', 'agent_prompts')->first()?->value ?? [];
+        if (!empty($prompts['assistant'])) {
+            return $prompts['assistant'];
+        }
+
         return <<<'PROMPT'
 Du bist ein Content-Strategie-Assistant für das Contentor-System. Du hilfst Nutzern dabei, Content-Strategien zu erstellen, zu verfeinern und zu optimieren.
 

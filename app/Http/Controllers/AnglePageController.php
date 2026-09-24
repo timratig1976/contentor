@@ -48,10 +48,36 @@ class AnglePageController extends Controller
         $strategies = Strategy::all();
         $batches = Angle::distinct()->whereNotNull('batch_key')->pluck('batch_key');
 
+        // Strategie-spezifische ICPs laden (aus icp_definitions der aktiven Strategie)
+        $activeStrategyKey = $request->input('strategy') ?: ($strategies->first()?->key ?? 'viscale');
+        $activeStrategy = $strategies->firstWhere('key', $activeStrategyKey);
+        $strategyIcps = [];
+        if ($activeStrategy) {
+            $stratContent = \App\Models\ContentStrategy::where('strategy_id', $activeStrategy->id)
+                ->where('key', 'icp_definitions')->first()?->content;
+            if (!empty($stratContent['icps'])) {
+                foreach ($stratContent['icps'] as $item) {
+                    if (!empty($item['key'])) {
+                        $strategyIcps[] = [
+                            'key' => $item['key'],
+                            'name' => $item['name'] ?? $item['key'],
+                        ];
+                    }
+                }
+            }
+            // Fallback auf rules.icpKeys
+            if (empty($strategyIcps) && !empty($activeStrategy->config['rules']['icpKeys'])) {
+                foreach ($activeStrategy->config['rules']['icpKeys'] as $k) {
+                    $strategyIcps[] = ['key' => $k, 'name' => $k];
+                }
+            }
+        }
+
         return Inertia::render('Angles/Index', [
             'angles' => $angles,
             'strategies' => $strategies,
             'batches' => $batches,
+            'strategyIcps' => $strategyIcps,
             'filters' => $request->only(['strategy', 'batch', 'icp', 'status', 'funnel']),
         ]);
     }

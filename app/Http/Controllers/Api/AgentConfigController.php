@@ -24,7 +24,7 @@ class AgentConfigController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'agent' => 'required|string|in:research,angle,production,review,coordinator',
+            'agent' => 'required|string|in:research,angle,angle_extract,production,review,coordinator,assistant',
             'system_prompt' => 'required|string',
         ]);
 

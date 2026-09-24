@@ -21,23 +21,31 @@ const hasEdenAI = computed(() => !!llmKeys.value?.edenai_key);
 
 const agents = {
     research: { icon: '🔍', name: 'Research', desc: 'Web-Recherche & Quellen-Extraktion' },
-    angle: { icon: '🎯', name: 'Angle', desc: 'Angle-Entwicklung & Ranking' },
+    angle: { icon: '🎯', name: 'Angle Ranking', desc: 'Angle-Entwicklung & Ranking' },
+    angle_extract: { icon: '⚡', name: 'Angle Extraction', desc: 'Extraktion neuer Angles aus Text & Quellen (Quick Input)' },
     production: { icon: '✍️', name: 'Production', desc: 'Content-Produktion aus Angles' },
     review: { icon: '✅', name: 'Review', desc: 'Qualitätsprüfung & Brand-Enforcement' },
     coordinator: { icon: '🧠', name: 'Coordinator', desc: 'Orchestriert den gesamten Workflow' },
+    assistant: { icon: '💬', name: 'Assistant', desc: 'Interaktiver Chat-Copilot (Strategien, ICPs, Personas)' },
 };
 
 const prompts = reactive({
-    research: props.agentPrompts?.research || '', angle: props.agentPrompts?.angle || '',
-    production: props.agentPrompts?.production || '', review: props.agentPrompts?.review || '',
+    research: props.agentPrompts?.research || '',
+    angle: props.agentPrompts?.angle || '',
+    angle_extract: props.agentPrompts?.angle_extract || '',
+    production: props.agentPrompts?.production || '',
+    review: props.agentPrompts?.review || '',
     coordinator: props.agentPrompts?.coordinator || '',
+    assistant: props.agentPrompts?.assistant || '',
 });
 const models = reactive({
     research: { provider: props.agentModels?.research?.provider || 'anthropic', model: props.agentModels?.research?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.research?.temperature ?? 0.7, max_tokens: props.agentModels?.research?.max_tokens || 4000, reasoning_effort: props.agentModels?.research?.reasoning_effort || 'medium' },
     angle: { provider: props.agentModels?.angle?.provider || 'anthropic', model: props.agentModels?.angle?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.angle?.temperature ?? 0.5, max_tokens: props.agentModels?.angle?.max_tokens || 8000, reasoning_effort: props.agentModels?.angle?.reasoning_effort || 'medium' },
+    angle_extract: { provider: props.agentModels?.angle?.provider || 'anthropic', model: props.agentModels?.angle?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.angle?.temperature ?? 0.3, max_tokens: 2000, reasoning_effort: 'none' },
     production: { provider: props.agentModels?.production?.provider || 'anthropic', model: props.agentModels?.production?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.production?.temperature ?? 0.8, max_tokens: props.agentModels?.production?.max_tokens || 4000, reasoning_effort: props.agentModels?.production?.reasoning_effort || 'medium' },
     review: { provider: props.agentModels?.review?.provider || 'openai', model: props.agentModels?.review?.model || 'gpt-4o', temperature: props.agentModels?.review?.temperature ?? 0.3, max_tokens: props.agentModels?.review?.max_tokens || 3000, reasoning_effort: props.agentModels?.review?.reasoning_effort || 'low' },
     coordinator: { provider: props.agentModels?.coordinator?.provider || 'openai', model: props.agentModels?.coordinator?.model || 'gpt-4o', temperature: props.agentModels?.coordinator?.temperature ?? 0.7, max_tokens: props.agentModels?.coordinator?.max_tokens || 3000, reasoning_effort: props.agentModels?.coordinator?.reasoning_effort || 'low' },
+    assistant: { provider: props.agentModels?.assistant?.provider || 'anthropic', model: props.agentModels?.assistant?.model || 'claude-sonnet-4-6', temperature: props.agentModels?.assistant?.temperature ?? 0.4, max_tokens: props.agentModels?.assistant?.max_tokens || 8000, reasoning_effort: props.agentModels?.assistant?.reasoning_effort || 'medium' },
 });
 
 // ─── Workflow & Loops ───────────────────────────────────────────────────
@@ -504,19 +512,41 @@ onMounted(() => { loadWorkflowRuns(); });
                 <!-- Prompt -->
                 <div v-if="detailTab === 'prompt'" class="neu-card p-5">
                     <div class="flex items-center justify-between mb-4">
-                        <h4 class="text-sm font-medium text-gray-800">System Prompt</h4>
-                        <button @click="savePrompt(activeAgent)" :disabled="saving" class="px-3 py-1.5 bg-neu text-white rounded-lg text-xs hover:bg-neu">Speichern</button>
+                        <div>
+                            <h4 class="text-sm font-semibold text-gray-800">System Prompt</h4>
+                            <p class="text-xs text-gray-400 mt-0.5">Wird bei jedem Aufruf als System-Message verwendet.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span v-if="saved" class="text-xs font-semibold text-green-600 bg-green-50 px-2 py-1 rounded">✓ Gespeichert</span>
+                            <button
+                                @click="savePrompt(activeAgent)"
+                                :disabled="saving"
+                                class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+                            >
+                                {{ saving ? 'Speichert…' : '💾 Prompt speichern' }}
+                            </button>
+                        </div>
                     </div>
-                    <textarea v-model="prompts[activeAgent]" rows="18" class="w-full bg-neu  rounded-lg p-3 text-sm text-gray-800 font-mono focus:outline-none focus:border-gray-400" placeholder="System-Prompt..."></textarea>
-                    <p class="text-xs text-gray-400 mt-2">Wird bei jedem Aufruf als System-Message verwendet.</p>
-                    <span v-if="saved" class="text-xs text-green-600 ml-3">✓ Gespeichert</span>
+                    <textarea v-model="prompts[activeAgent]" rows="18" class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm text-gray-800 font-mono focus:outline-none focus:border-green-500 shadow-inner" placeholder="System-Prompt..."></textarea>
                 </div>
 
                 <!-- Model -->
                 <div v-if="detailTab === 'model'" class="neu-card p-5">
                     <div class="flex items-center justify-between mb-4">
-                        <h4 class="text-sm font-medium text-gray-800">Modell-Konfiguration</h4>
-                        <button @click="saveModels(activeAgent)" :disabled="modelsSaving" class="px-3 py-1.5 bg-neu text-white rounded-lg text-xs hover:bg-neu">Speichern</button>
+                        <div>
+                            <h4 class="text-sm font-semibold text-gray-800">Modell-Konfiguration</h4>
+                            <p class="text-xs text-gray-400 mt-0.5">Parameter für dieses LLM anpassen (Auto-Save ist aktiv).</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span v-if="modelsSaved" class="text-xs font-semibold text-green-600 bg-green-50 px-2 py-1 rounded">✓ Gespeichert</span>
+                            <button
+                                @click="saveModels(activeAgent)"
+                                :disabled="modelsSaving"
+                                class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+                            >
+                                {{ modelsSaving ? 'Speichert…' : '💾 Modell speichern' }}
+                            </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>

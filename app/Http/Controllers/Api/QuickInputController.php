@@ -404,25 +404,31 @@ class QuickInputController extends Controller
         foreach ($result['angles'] as $item) {
             $icp = $item['icp'] ?: $this->rulesService->guessIcp($item['angle'], null, $strategy);
 
-            // Cluster: dem LLM-Urteil vertrauen. Es setzt pain_cluster NUR, wenn
-            // der Angle eindeutig passt — sonst bewusst leer. Kein erzwungener
-            // Regex-/Default-Fallback, der unpassende Cluster zuweisen würde
-            // (z. B. "pay per use" → fälschlich "Blindflug im Forecast").
-            $cluster = null;
-            if (! empty($item['pain_cluster'])) {
+            // Cluster: dem LLM-Urteil vertrauen. Wenn das LLM ein Cluster gesetzt hat,
+            // übernehmen wir es (sowohl Code als auch Name).
+            $painCluster = !empty($item['pain_cluster']) ? $item['pain_cluster'] : null;
+            if ($painCluster) {
                 foreach ($strategy->clusters as $c) {
-                    if ($c['code'] === $item['pain_cluster']) { $cluster = $c; break; }
+                    if ($c['code'] === $painCluster || $c['name'] === $painCluster) {
+                        $painCluster = "{$c['code']} · {$c['name']}";
+                        break;
+                    }
                 }
             }
-            $painCluster = $cluster ? "{$cluster['code']} · {$cluster['name']}" : null;
+
             $statementType = $item['statement_type'] ?: $this->rulesService->pickStatementType(null, null, $item['angle']);
 
             $drafts[] = [
-                'angle'          => $item['angle'],
-                'icp'            => $icp,
-                'pain_cluster'   => $painCluster,
-                'statement_type' => $statementType,
+                'angle'           => $item['angle'],
+                'icp'             => $icp,
+                'pain_cluster'    => $painCluster,
+                'statement_type'  => $statementType,
+                'funnel'          => $item['funnel'] ?? null,
+                'score_reasoning' => $item['score_reasoning'] ?? null,
             ];
+        }
+
+        return $drafts;
         }
 
         return $drafts;

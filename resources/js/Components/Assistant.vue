@@ -17,6 +17,46 @@ function getActiveStrategy() {
     return currentStrategy.value || page.props.activeCampaign || page.props.strategies?.[0]?.key || null;
 }
 
+// Ermittelt den aktuellen Seiten-Kontext zur Übergabe an den LLM-Assistant
+function getPageContext() {
+    const path = window.location.pathname || '/';
+    const component = page.component || '';
+    
+    // Extrahierte Daten je nach aktueller Seite
+    const details = {};
+    if (page.props.angle) {
+        details.angle = {
+            id: page.props.angle.id,
+            headline: page.props.angle.headline,
+            hook: page.props.angle.hook,
+            icp: page.props.angle.icp,
+            status: page.props.angle.status,
+            ranking_score: page.props.angle.ranking_score,
+        };
+    }
+    if (page.props.contentItem) {
+        details.contentItem = {
+            id: page.props.contentItem.id,
+            headline: page.props.contentItem.headline,
+            format: page.props.contentItem.format,
+            status: page.props.contentItem.status,
+        };
+    }
+    if (page.props.source) {
+        details.source = {
+            id: page.props.source.id,
+            title: page.props.source.title,
+            url: page.props.source.url,
+        };
+    }
+
+    return {
+        path,
+        title: component || path,
+        details: Object.keys(details).length > 0 ? details : null,
+    };
+}
+
 // Messages aus localStorage laden, Fallback auf Begrüßung
 function loadMessages() {
     try {
@@ -94,7 +134,12 @@ async function sendMessage() {
         const res = await fetch('/api/assistant/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
-            body: JSON.stringify({ message: msg, history: messages.value.map(m => ({ role: m.role, message: m.text })), strategy: currentStrategy.value || getActiveStrategy() }),
+            body: JSON.stringify({
+                message: msg,
+                history: messages.value.map(m => ({ role: m.role, message: m.text })),
+                strategy: currentStrategy.value || getActiveStrategy(),
+                page_context: getPageContext(),
+            }),
         });
         const data = await res.json();
         const reply = data.reply || 'Keine Antwort erhalten.';

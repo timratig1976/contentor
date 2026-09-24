@@ -45,7 +45,50 @@ class QuickInputAgentService
         foreach ($rules['clusters'] ?? [] as $c) {
             $clusterList .= "- {$c['code']}: {$c['name']}\n";
         }
-        $forbidden = implode(', ', $rules['forbiddenPatterns'] ?? []);
+        
+        // Neu: Content-Strategie Pillars & Unterthemen einbinden
+        $contentStrategy = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'content_strategy')->first()?->content;
+        $pillarList = '';
+        if (!empty($contentStrategy['pillars'])) {
+            foreach ($contentStrategy['pillars'] as $p) {
+                $pName = $p['name'] ?? '';
+                $pGoal = !empty($p['goal']) ? " (Ziel: {$p['goal']})" : '';
+                $pSubs = !empty($p['subtopics']) ? ' [Unterthemen: ' . implode(', ', (array) $p['subtopics']) . ']' : '';
+                $pillarList .= "- Cluster: {$pName}{$pGoal}{$pSubs}\n";
+            }
+        }
+
+        // Neu: Brand Voice der Strategie einbinden (Personality, Musts, Nevers, Tonalität)
+        $brandVoice = \App\Models\ContentStrategy::where('strategy_id', $strategy->id)
+            ->where('key', 'brand_voice')->first()?->content;
+        $bvBlock = '';
+        if ($brandVoice) {
+            $bvParts = [];
+            if (!empty($brandVoice['personality'])) {
+                $bvParts[] = "- Haltung & Charakter: " . $brandVoice['personality'];
+            }
+            if (!empty($brandVoice['tone'])) {
+                $bvParts[] = "- Tonalität: " . $brandVoice['tone'];
+            }
+            if (!empty($brandVoice['must'])) {
+                $bvParts[] = "- Pflicht-Kriterien (jeder Angle muss dem entsprechen): " . implode('; ', (array) $brandVoice['must']);
+            }
+            if (!empty($brandVoice['never'])) {
+                $bvParts[] = "- Absolute No-Gos: " . implode('; ', (array) $brandVoice['never']);
+            }
+            if (!empty($brandVoice['examples'])) {
+                $bvParts[] = "- Vorher/Nachher Sprachbeispiele beachten (kein Hype, sondern konkreter Klartext).";
+            }
+            if (!empty($bvParts)) {
+                $bvBlock = "BRAND VOICE & HALTUNG DER STRATEGIE:\n" . implode("\n", $bvParts) . "\n\n";
+            }
+        }
+
+        $forbidden = implode(', ', array_unique(array_merge(
+            $rules['forbiddenPatterns'] ?? [],
+            (array) ($brandVoice['never'] ?? [])
+        )));
 
         // Zielsprache aus der Strategie (Default Deutsch)
         $langName = $strategy->language_name ?? 'Deutsch';
@@ -63,7 +106,25 @@ class QuickInputAgentService
             }
         }
 
-        $systemPrompt = "Du bist ein Content-Analyst. Extrahiere aus dem folgenden Text die {$maxAngles} stärksten Content-Angles (Thesen/Aussagen, die sich als LinkedIn-Post eignen).
+        // Prompt aus Einstellungen laden (editierbar), mit robustem Fallback
+        $customPrompt = \App\Models\Setting::where('key', 'agent_prompts')->first()?->value['angle_extract'] ?? null;
+
+        if ($customPrompt) {
+            $systemPrompt = str_replace(
+                ['{{maxAngles}}', '{{langName}}', '{{icpList}}', '{{pillarList}}', '{{forbidden}}', '{{bvBlock}}', '{{icpContext}}'],
+                [
+                    $maxAngles,
+                    $langName,
+                    $icpList,
+                    ($pillarList ?: $clusterList),
+                    $forbidden,
+                    $bvBlock,
+                    ($icpContext !== '' ? "ICP-KONTEXT (Kunden-Stimme, Messaging-Frames, bevorzugte Statement-Typen):\n{$icpContext}" : '')
+                ],
+                $customPrompt
+            );
+        } else {
+            $systemPrompt = "Du bist ein Content-Analyst. Extrahiere aus dem folgenden Text die {$maxAngles} stärksten Content-Angles (Thesen/Aussagen, die sich als LinkedIn-Post eignen).
 
 REGELN:
 - Jeder Angle ist EIN präziser, knackiger Satz (max. 200 Zeichen)
@@ -76,18 +137,20 @@ SPRACHE: Formuliere ALLE Angles auf {$langName} — auch wenn der Quelltext in e
 Format: valides JSON-Array, jedes Objekt hat:
   - \"angle\": string (die Kernaussage auf {$langName}, max 200 Zeichen)
   - \"icp\": string (NUR wenn der Angle eindeutig zu einem ICP passt, sonst \"\")
-  - \"pain_cluster\": string (NUR wenn der Angle eindeutig zu einem Cluster passt, sonst \"\")
+  - \"pain_cluster\": string (Name des passenden Themenclusters oder Pain-Clusters, sonst \"\")
   - \"statement_type\": string (einer von: Direkt, Drastisch, Bedrohlich, Gain, Mechanismus, Vision)
+  - \"funnel\": string (einer von: ToFu, MoFu, BoFu — je nach Customer Journey Stufe)
 
 VERFÜGBARE ICPs: {$icpList}
-VERFÜGBARE PAIN-CLUSTER:
-{$clusterList}
+VERFÜGBARE THEMENCLUSTER & UNTERTHEMEN:
+" . ($pillarList ?: $clusterList) . "
 VERBOTENE BEGRIFFE (vermeiden): {$forbidden}
 
-" . ($icpContext !== '' ? "ICP-KONTEXT (Kunden-Stimme, Messaging-Frames, bevorzugte Statement-Typen — damit Angles kundennah klingen und die richtige Tonalität treffen):\n{$icpContext}" : '') . "
+{$bvBlock}" . ($icpContext !== '' ? "ICP-KONTEXT (Kunden-Stimme, Messaging-Frames, bevorzugte Statement-Typen — damit Angles kundennah klingen und die richtige Tonalität treffen):\n{$icpContext}" : '') . "
 
 Wichtig: icp und pain_cluster NUR setzen wenn der Angle-INHALT eindeutig dazu passt. Keine Defaults, kein Raten. Lieber leer lassen.
 Antworte NUR mit dem JSON-Array, keine Erklärungen.";
+        }
 
         $userPrompt = "Extrahiere Angles aus diesem Text (Angles auf {$langName}):\n\n---\n{$content}\n---";
 
@@ -126,14 +189,36 @@ Antworte NUR mit dem JSON-Array, keine Erklärungen.";
                     'icp' => '',
                     'pain_cluster' => '',
                     'statement_type' => '',
+                    'funnel' => '',
                 ];
-            } elseif (is_array($item) && !empty($item['angle'])) {
-                $angles[] = [
-                    'angle' => mb_substr(trim($item['angle']), 0, 200),
-                    'icp' => $item['icp'] ?? '',
-                    'pain_cluster' => $item['pain_cluster'] ?? '',
-                    'statement_type' => $item['statement_type'] ?? '',
-                ];
+            } elseif (is_array($item)) {
+                // Unterstützt sowohl das klassische {"angle": "..."} als auch das neue Schema mit {"angle_draft": "...", "claim": "..."}
+                $angleText = $item['angle_draft'] ?? $item['angle'] ?? $item['claim'] ?? '';
+                if (!empty($angleText)) {
+                    $cluster = $item['cluster'] ?? $item['pain_cluster'] ?? '';
+                    $statementType = $item['claim_type'] ?? $item['statement_type'] ?? '';
+                    $funnel = $item['funnel'] ?? '';
+                    $icp = $item['icp'] ?? '';
+
+                    // Belegstelle & Verifikations-Hinweis zusammenstellen
+                    $evidence = $item['evidence'] ?? null;
+                    $reasoning = null;
+                    if ($evidence) {
+                        $reasoning = "Beleg: " . mb_substr($evidence, 0, 300);
+                        if (!empty($item['needs_verification'])) {
+                            $reasoning .= " | ⚠️ Zu verifizieren: " . ($item['verification_reason'] ?? 'Quelle unvollständig');
+                        }
+                    }
+
+                    $angles[] = [
+                        'angle' => mb_substr(trim($angleText), 0, 200),
+                        'icp' => $icp,
+                        'pain_cluster' => $cluster,
+                        'statement_type' => $statementType,
+                        'funnel' => $funnel,
+                        'score_reasoning' => $reasoning,
+                    ];
+                }
             }
         }
 
