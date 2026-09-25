@@ -30,6 +30,7 @@ Route::get('/templates', [TemplatesPageController::class, 'index'])->name('templ
 Route::get('/medien', [MediaPageController::class, 'index'])->name('medien');
 Route::get('/newsletter', [NewsletterPageController::class, 'index'])->name('newsletter');
 Route::get('/agents', [AgentsPageController::class, 'index'])->name('agents');
+Route::get('/agents/flow', [AgentsPageController::class, 'flow'])->name('agents.flow');
 Route::get('/logs', [LlmLogsPageController::class, 'index'])->name('logs');
 Route::get('/monitoring', [MonitoringPageController::class, 'index'])->name('monitoring');
 Route::get('/einstellungen', [EinstellungenPageController::class, 'index'])->name('einstellungen');

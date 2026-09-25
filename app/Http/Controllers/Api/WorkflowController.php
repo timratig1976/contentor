@@ -10,43 +10,69 @@ use Illuminate\Http\Request;
 class WorkflowController extends Controller
 {
     /**
-     * Startet den Python-Multi-Agent-Workflow im Debug-Modus (trace_output.json)
-     * im Hintergrund und speichert Input + Ergebnis in workflow_runs.
+     * Startet einen PHP-nativen Multi-Agent-Workflow via Neuron AI.
      */
     public function run(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'input' => 'required|string|max:1000',
+            'input'    => 'required|string|max:2000',
+            'strategy' => 'nullable|string|exists:strategies,key',
+            'phases'   => 'nullable|array',
+            'phases.*' => 'in:research,angle,production,review',
+            'persona_id' => 'nullable|integer|exists:personas,id',
         ]);
+
+        $strategyKey = $validated['strategy'] ?? 'viscale';
+        $phases = $validated['phases'] ?? ['research', 'angle', 'production', 'review'];
+        $testMode = $request->boolean('test_mode', true); // Test-Modus: Angles als Vorschlag merken, keine automatische DB-Befüllung
+        $personaId = !empty($validated['persona_id']) ? (int) $validated['persona_id'] : null;
 
         $run = WorkflowRun::create([
-            'input' => $validated['input'],
+            'input'  => $validated['input'],
             'status' => 'running',
+            'trace'  => json_encode([
+                'started_at' => now()->toIso8601String(),
+                'strategy'   => $strategyKey,
+                'phases'     => $phases,
+                'persona_id' => $personaId,
+                'test_mode'  => $testMode,
+                'timeline'   => [
+                    [
+                        'id' => 'evt_init',
+                        'type' => 'llm_input',
+                        'agent' => 'research',
+                        'title' => 'Starte Pipeline: Initialisierung…',
+                        'details' => ['input' => $validated['input'], 'phases' => $phases, 'persona_id' => $personaId],
+                        'timestamp' => now()->toIso8601String(),
+                    ]
+                ],
+                'loops'      => [],
+                'proposed_angles' => [],
+                'steps'      => [
+                    [
+                        'agent' => 'research',
+                        'status' => 'running',
+                        'message' => 'Initialisiere Neuron AI Multi-Agent Pipeline…',
+                        'timestamp' => now()->toIso8601String(),
+                    ]
+                ],
+            ], JSON_UNESCAPED_UNICODE),
         ]);
 
-        $base = base_path('content-agent');
-        $script = $base . '/debug_run.py';
-
-        $python = trim((string) shell_exec('command -v python3'));
-        if ($python === '') {
-            $python = 'python3';
-        }
-
-        // Detached ausführen: python debug_run.py <input> >> <run>.log 2>&1 &
-        // Ergebnis (trace_output.json) wird beim Poll zurückgelesen.
-        $inputArg = escapeshellarg($validated['input']);
-        $logFile = storage_path('logs/workflow_' . $run->id . '.log');
-
-        $cmd = 'cd ' . escapeshellarg($base)
-            . ' && ' . escapeshellarg($python) . ' ' . escapeshellarg($script)
-            . ' ' . $inputArg . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
-
-        exec($cmd);
+        // Workflow asynchron im Hintergrund-Job ausführen
+        \App\Jobs\ExecuteContentWorkflowJob::dispatch(
+            $run->id,
+            $strategyKey,
+            $validated['input'],
+            $phases,
+            $testMode,
+            $personaId
+        );
 
         return response()->json([
-            'run' => $run,
-            'message' => 'Workflow gestartet. Ergebnis wird im Verlauf aktualisiert.',
-        ], 202);
+            'run'     => $run->fresh(),
+            'message' => 'Workflow gestartet.',
+        ], 200);
     }
 
     /**
@@ -74,6 +100,163 @@ class WorkflowController extends Controller
         }
 
         return response()->json($run->fresh());
+    }
+
+    /**
+     * Gibt einen im Test-Lauf vorgeschlagenen Angle frei und legt ihn in der Datenbank an.
+     */
+    public function approveAngle(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'run_id'      => 'required|integer|exists:workflow_runs,id',
+            'proposed_id' => 'required|string',
+        ]);
+
+        $run = WorkflowRun::findOrFail($validated['run_id']);
+        $trace = json_decode($run->trace ?? '{}', true) ?: [];
+        $proposedAngles = $trace['proposed_angles'] ?? [];
+
+        $targetIdx = null;
+        foreach ($proposedAngles as $idx => $p) {
+            if (($p['id'] ?? '') === $validated['proposed_id']) {
+                $targetIdx = $idx;
+                break;
+            }
+        }
+
+        if ($targetIdx === null) {
+            return response()->json(['error' => 'Vorgeschlagener Angle nicht im Run gefunden.'], 404);
+        }
+
+        $prop = $proposedAngles[$targetIdx];
+
+        if (!empty($prop['saved_angle_id'])) {
+            return response()->json([
+                'message'  => 'Angle wurde bereits freigegeben.',
+                'angle_id' => $prop['saved_angle_id'],
+            ]);
+        }
+
+        $strategyKey = $prop['strategy'] ?? 'viscale';
+        $strategyModel = \App\Models\Strategy::where('key', $strategyKey)->first();
+
+        $angle = \App\Models\Angle::create([
+            'angle'          => $prop['angle'],
+            'strategy_id'    => $strategyModel?->id,
+            'icp'            => $prop['icp'] ?? null,
+            'pain_cluster'   => $prop['pain_cluster'] ?? null,
+            'statement_type' => $prop['statement_type'] ?? null,
+            'funnel'         => $prop['funnel'] ?? null,
+            'batch_key'      => $prop['batch_key'] ?? ('run_' . $run->id),
+            'r_zielgruppe'   => $prop['r_zielgruppe'] ?? null,
+            'r_viscale_fit'  => $prop['r_viscale_fit'] ?? null,
+            'r_schaerfe'     => $prop['r_schaerfe'] ?? null,
+            'r_timing'       => $prop['r_timing'] ?? null,
+            'ranking_score'  => $prop['ranking_score'] ?? null,
+            'score_reasoning'=> $prop['score_reasoning'] ?? null,
+            'status'         => 'approved',
+        ]);
+
+        $proposedAngles[$targetIdx]['approved'] = true;
+        $proposedAngles[$targetIdx]['saved_angle_id'] = $angle->id;
+        $proposedAngles[$targetIdx]['status'] = 'approved';
+
+        $trace['proposed_angles'] = $proposedAngles;
+        $run->update(['trace' => json_encode($trace, JSON_UNESCAPED_UNICODE)]);
+
+        return response()->json([
+            'message'  => 'Angle erfolgreich freigegeben und in Pipeline übernommen.',
+            'angle_id' => $angle->id,
+            'angle'    => $angle,
+            'run'      => $run->fresh(),
+        ]);
+    }
+
+    /**
+     * Gibt alle noch offenen vorgeschlagenen Angles eines Runs auf einmal frei.
+     */
+    public function approveAllAngles(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'run_id' => 'required|integer|exists:workflow_runs,id',
+        ]);
+
+        $run = WorkflowRun::findOrFail($validated['run_id']);
+        $trace = json_decode($run->trace ?? '{}', true) ?: [];
+        $proposedAngles = $trace['proposed_angles'] ?? [];
+
+        $created = [];
+        foreach ($proposedAngles as $idx => $prop) {
+            if (empty($prop['saved_angle_id'])) {
+                $strategyKey = $prop['strategy'] ?? 'viscale';
+                $strategyModel = \App\Models\Strategy::where('key', $strategyKey)->first();
+
+                $angle = \App\Models\Angle::create([
+                    'angle'          => $prop['angle'],
+                    'strategy_id'    => $strategyModel?->id,
+                    'icp'            => $prop['icp'] ?? null,
+                    'pain_cluster'   => $prop['pain_cluster'] ?? null,
+                    'statement_type' => $prop['statement_type'] ?? null,
+                    'funnel'         => $prop['funnel'] ?? null,
+                    'batch_key'      => $prop['batch_key'] ?? ('run_' . $run->id),
+                    'r_zielgruppe'   => $prop['r_zielgruppe'] ?? null,
+                    'r_viscale_fit'  => $prop['r_viscale_fit'] ?? null,
+                    'r_schaerfe'     => $prop['r_schaerfe'] ?? null,
+                    'r_timing'       => $prop['r_timing'] ?? null,
+                    'ranking_score'  => $prop['ranking_score'] ?? null,
+                    'score_reasoning'=> $prop['score_reasoning'] ?? null,
+                    'status'         => 'approved',
+                ]);
+
+                $proposedAngles[$idx]['approved'] = true;
+                $proposedAngles[$idx]['saved_angle_id'] = $angle->id;
+                $proposedAngles[$idx]['status'] = 'approved';
+                $created[] = $angle->id;
+            }
+        }
+
+        $trace['proposed_angles'] = $proposedAngles;
+        $run->update(['trace' => json_encode($trace, JSON_UNESCAPED_UNICODE)]);
+
+        return response()->json([
+            'message'     => count($created) . ' Angles erfolgreich in Pipeline übernommen.',
+            'created_ids' => $created,
+            'run'         => $run->fresh(),
+        ]);
+    }
+
+    /**
+     * Bricht einen laufenden Workflow-Run ab.
+     */
+    public function cancel(int $id): JsonResponse
+    {
+        $run = WorkflowRun::find($id);
+        if (!$run) {
+            return response()->json(['error' => 'Run not found'], 404);
+        }
+
+        $trace = json_decode($run->trace ?? '{}', true) ?: [];
+        $timeline = $trace['timeline'] ?? [];
+        $timeline[] = [
+            'id' => 'evt_cancelled_' . uniqid(),
+            'type' => 'info',
+            'agent' => 'system',
+            'title' => 'Workflow durch Benutzer abgebrochen',
+            'details' => ['cancelled_at' => now()->toIso8601String()],
+            'timestamp' => now()->toIso8601String(),
+        ];
+        $trace['timeline'] = $timeline;
+
+        $run->update([
+            'status' => 'cancelled',
+            'trace'  => json_encode($trace, JSON_UNESCAPED_UNICODE),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Workflow erfolgreich abgebrochen.',
+            'run'     => $run->fresh(),
+        ]);
     }
 
     /**

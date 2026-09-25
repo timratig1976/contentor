@@ -315,8 +315,12 @@ onMounted(() => { loadWorkflowRuns(); });
                     <h1 class="text-2xl font-semibold text-gray-800 tracking-tight">Agents</h1>
                     <p class="text-sm text-gray-400 mt-1">Multi-Agent Content-Workflow</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-xs px-2 py-1 rounded-full" :class="hasEdenAI ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'">EdenAI {{ hasEdenAI ? '✓' : '✗' }}</span>
+                <div class="flex items-center gap-3">
+                    <a href="/agents/flow" class="neu-btn-primary px-3.5 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-sm">
+                        <span>🔄</span>
+                        <span>Zum Agent Flow Visualizer →</span>
+                    </a>
+                    <span class="text-xs px-2.5 py-1.5 rounded-full" :class="hasEdenAI ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'">EdenAI {{ hasEdenAI ? '✓' : '✗' }}</span>
                 </div>
             </div>
 
@@ -338,53 +342,18 @@ onMounted(() => { loadWorkflowRuns(); });
                     </div>
                 </div>
 
-                <div class="neu-card p-5 mt-6">
-                    <h3 class="text-sm font-medium text-gray-800 mb-3">▶ Workflow starten & Datenfluss-Debug</h3>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <!-- Input + Run -->
-                        <div class="lg:col-span-1 space-y-3">
-                            <p class="text-xs text-gray-500">Führt den gesamten Multi-Agent-Workflow aus und protokolliert jeden Schritt (Prompts, Tool-Calls, Ergebnisse).</p>
-                            <textarea v-model="wfInput" rows="4"
-                                class="w-full bg-neu  rounded-lg p-3 text-sm text-gray-800 focus:outline-none focus:border-gray-400"
-                                placeholder="z. B. Recherchiere zum Thema CRM-Datenqualität und produziere LinkedIn-Posts"></textarea>
-                            <button @click="runWorkflow" :disabled="wfRunning || !wfInput.trim()"
-                                class="w-full px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
-                                {{ wfRunning ? 'Starte…' : '▶ Workflow starten' }}
-                            </button>
-                            <p class="text-[11px] text-gray-400">Voraussetzung: <code class="bg-neu px-1 rounded">content-agent/.env</code> mit EDENAI_API_KEY + <code class="bg-neu px-1 rounded">pip install -r requirements.txt</code></p>
-                        </div>
-
-                        <!-- Console/Debug -->
-                        <div class="lg:col-span-2">
-                            <div class="flex items-center justify-between mb-2">
-                                <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Console / Trace</h4>
-                                <span v-if="wfResult" class="text-xs px-2 py-1 rounded-full" :class="runStatusClass(wfResult.status)">{{ wfResult.status }}</span>
-                            </div>
-                            <div class="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-xs text-gray-200 whitespace-pre-wrap">
-                                <span v-if="!wfResult" class="text-gray-500">Noch kein Lauf. Gib oben eine Aufgabe ein und starte den Workflow.</span>
-                                <span v-else-if="wfResult.status === 'running'" class="text-blue-300">⏳ Workflow läuft… (Ergebnis erscheint hier automatisch)</span>
-                                <pre v-else class="whitespace-pre-wrap">{{ wfResult.output || wfResult.trace || '(Kein Output)' }}</pre>
-                            </div>
-                        </div>
+                <!-- Banner to Agent Flow -->
+                <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mt-6 flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                            <span>🔄</span>
+                            <span>Neuron AI Agent Flow & Live-Tester</span>
+                        </h3>
+                        <p class="text-xs text-gray-600 mt-1">Multi-Agenten Pipeline visuell durchlaufen, Tool-Calls in Echtzeit verfolgen und Content generieren.</p>
                     </div>
-
-                    <!-- History -->
-                    <div class="mt-5 border-t border-neu-border pt-4">
-                        <div class="flex items-center justify-between mb-2">
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Verlauf (automatische Historie)</h4>
-                            <button @click="loadWorkflowRuns" class="text-xs text-gray-400 hover:text-green-600">↻ Aktualisieren</button>
-                        </div>
-                        <div v-if="workflowRuns.length === 0" class="text-xs text-gray-400 py-2">Noch keine Läufe.</div>
-                        <div v-else class="space-y-1.5 max-h-48 overflow-y-auto">
-                            <div v-for="run in workflowRuns" :key="run.id" @click="showRun(run)"
-                                class="flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-gray-200 hover:bg-gray-50 cursor-pointer">
-                                <span class="text-xs px-2 py-0.5 rounded-full shrink-0" :class="runStatusClass(run.status)">#{{ run.id }} · {{ run.status }}</span>
-                                <span class="text-xs text-gray-700 truncate flex-1">{{ run.input || '(ohne Input)' }}</span>
-                                <span class="text-xs text-gray-400 shrink-0">{{ fmtTs(run.created_at) }}</span>
-                            </div>
-                        </div>
-                    </div>
+                    <a href="/agents/flow" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-lg transition-colors shadow-sm shrink-0">
+                        Agent Flow öffnen →
+                    </a>
                 </div>
 
                 <!-- WORKFLOW & LOOPS -->

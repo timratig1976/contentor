@@ -141,7 +141,10 @@ Route::post('/monitoring/run', [MonitoringController::class, 'run']);
 Route::post('/monitoring/sources/{source}/check', [MonitoringController::class, 'checkSource']);
 Route::post('/monitoring/test-search', [MonitoringController::class, 'testSearch']);
 
-// Workflow-Runner (Python-Multi-Agent-Debug) + Verlauf
+// Workflow-Runner (PHP Multi-Agent via Neuron AI) + Verlauf
 Route::post('/workflow/run', [WorkflowController::class, 'run']);
 Route::get('/workflow/runs', [WorkflowController::class, 'index']);
 Route::get('/workflow/runs/{run}', [WorkflowController::class, 'show']);
+Route::post('/workflow/runs/{run}/cancel', [WorkflowController::class, 'cancel']);
+Route::post('/workflow/approve-angle', [WorkflowController::class, 'approveAngle']);
+Route::post('/workflow/approve-all-angles', [WorkflowController::class, 'approveAllAngles']);
